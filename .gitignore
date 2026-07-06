@@ -41,3 +41,10 @@ plots/
 *.png
 *.pdf
 !paper/figures/**
+
+# =============================================================================
+# Local run outputs (quicktest and any other config's cache_dir/plot_dir
+# that lives inside the repo) — always disposable, always regenerable by
+# re-running the pipeline scripts.
+# =============================================================================
+/runs/
