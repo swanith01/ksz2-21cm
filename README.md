@@ -56,7 +56,86 @@ not your real fiducial setup. `load_config()` will raise a clear `KeyError`
 if a required field is missing, rather than silently running with wrong
 numbers.
 
-## Repository layout
+## Testing the pipeline (verified sequence)
+
+Everything below was actually run, in this order, on a desktop (not the
+cluster) and confirmed working. If you're setting this up on a new machine
+or picking the project back up after a break, this is the fastest path to
+confidence that nothing is silently broken.
+
+### 1. Environment sanity checks (no py21cmfast calls yet)
+```bash
+conda activate ksz2-21cm
+python -c "import py21cmfast; print(py21cmfast.__version__)"   # expect 3.3.1
+python -m pytest tests/                                          # expect 4 passed
+```
+If either of these fails, see `environment.yml` — every dependency issue
+hit while setting this up on a fresh desktop (wrong package name, a
+matplotlib version incompatibility, a conda channel-mixing trap, and a
+`~/.local` user-site shadowing issue) is documented there with the exact
+fix, not just here.
+
+### 2. Smoke-test the full pipeline with `quicktest.yaml`
+Small and fast on purpose (2 seeds, `HII_DIM=32`, narrow z-range) — this is
+for confirming nothing is broken, not for physics. Run each step and check
+its output before moving to the next one:
+```bash
+python scripts/01_run_lightcones.py      --config configs/variants/quicktest.yaml
+python scripts/02_compute_ksz_maps.py    --config configs/variants/quicktest.yaml
+python scripts/03_compute_cross_corr.py  --config configs/variants/quicktest.yaml
+python scripts/04_compute_cross_corr_sq.py --config configs/variants/quicktest.yaml
+python paper/figure_scripts/overlay_zhou25.py          --config configs/variants/quicktest.yaml
+python paper/figure_scripts/shape_comparison_zhou25.py --config configs/variants/quicktest.yaml
+```
+Expect each to end with a `✓ N/N ready` or `Saved: ...` line. `UserWarning`
+lines about `FlagOptions`/`hires_vx` etc. from py21cmfast itself are normal
+noise — ignore them. `RuntimeWarning: Mean of empty slice` from the figure
+scripts is also expected at this tiny scale (some ℓ-bins genuinely have no
+valid modes in a 32-pixel box) — it should mostly disappear at
+`fiducial.yaml`'s real resolution.
+
+`scripts/05_compute_snr_forecast.py` is the one exception: its full-
+covariance SNR estimator needs **at least 4 seeds** to build a covariance
+matrix at all, so it can't be meaningfully tested on `quicktest`'s 2 seeds
+— that one only gets a real test on a real (≥4-seed) run.
+
+### 3. Spot-check the actual numbers, not just "did it crash"
+A script exiting cleanly doesn't mean the output is physically sane. After
+step 04, check the cross-power spectrum directly:
+```bash
+python3 << 'EOF'
+import numpy as np
+d = np.load('runs/quicktest/cache/seed_1/cross_corr_sq_seed1.npy', allow_pickle=True).item()
+for z0, res in d.items():
+    D = res['D_cross']
+    ell = res['ell']
+    print(f"z0={z0}: ell range [{ell.min():.1f}, {ell.max():.1f}]  D_cross finite={np.isfinite(D).sum()}/{len(D)}  D_cross range [{np.nanmin(D):.3e}, {np.nanmax(D):.3e}]")
+EOF
+```
+Look for: a sensible ℓ range (not zero, not absurd), most bins finite (some
+NaN at the box edges is fine, especially at `quicktest` scale), and a
+nonzero, non-degenerate `D_cross` range. Then actually open the PNGs from
+`plot_dir` and look at them — shapes that track loosely with the Zhou+25
+overlay curves, no flat lines or exploding axes.
+
+### 4. Known gotchas already fixed (don't re-debug these)
+If you hit any of these again on a *different* machine, the fix is already
+written down — check there first before troubleshooting from scratch:
+- `AttributeError: 'py21cmfast' package name` → see `environment.yml`
+  (it's `21cmfast` on conda-forge, imports as `py21cmfast`)
+- `AttributeError: plt.register_cmap` → matplotlib version pin, see
+  `environment.yml`
+- Conda "unsatisfiable" wall of text on any `conda install` into this env
+  → you probably forgot `-c conda-forge`, see `environment.yml`
+- `matplotlib.__file__` pointing at `~/.local/...` instead of the env →
+  user-site shadowing, see the `PYTHONNOUSERSITE` note in `environment.yml`
+- `FileExistsError: .../<class 'pathlib.Path'>/wisdoms` or a seed reporting
+  "computed" with no `LightCone_*.h5` anywhere → see the two fixes in
+  `src/ksz2_21cm/simulate/lightcone_worker.py` (forcing `config['direc']`
+  per-seed, and calling `lc.save()` explicitly — `write=True` alone only
+  caches intermediate boxes, not the final LightCone)
+
+
 
 ```
 configs/            fiducial.yaml + variants — all run parameters, no code

@@ -13,8 +13,20 @@
 run_name: quicktest
 
 paths:
-  cache_dir: ~/ksz2_21cm_runs/quicktest/cache
-  plot_dir:  ~/ksz2_21cm_runs/quicktest/plots
+  # Lives inside the repo (runs/), not the home directory — quicktest is a
+  # throwaway smoke test, easy to find and `rm -rf` from one place. Relative
+  # paths resolve from wherever you run the script FROM, so always run these
+  # from the repo root (as in every example in this repo). runs/ is
+  # git-ignored (see .gitignore), so this never gets committed.
+  #
+  # fiducial.yaml deliberately stays under ~/ (or scratch storage on the
+  # cluster) rather than following this same pattern — a real HII_DIM=128,
+  # 20-seed run can be many GB, and tying that to wherever your git checkout
+  # happens to sit is a liability (e.g. an accidental repo-directory cleanup
+  # taking real results down with it). quicktest is small and disposable;
+  # fiducial isn't.
+  cache_dir: runs/quicktest/cache
+  plot_dir:  runs/quicktest/plots
 
 simulation:
   hii_dim: 32          # much smaller than fiducial's 128 — fast, not physical
