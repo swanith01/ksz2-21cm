@@ -1,0 +1,43 @@
+# =============================================================================
+# quicktest.yaml — small/fast variant of fiducial.yaml for debugging the
+# pipeline itself (e.g. on a laptop, or checking a code change didn't break
+# anything) before committing to a full-resolution cluster run.
+#
+# CHECK: this only overrides a few fields for illustration — inherit-and-
+# override isn't wired up automatically (plain yaml, no OmegaConf), so this
+# is a full standalone copy of fiducial.yaml with smaller numbers. Keep it
+# in sync by hand, or introduce a merge step in utils/config.py if this
+# pattern gets used often.
+# =============================================================================
+
+run_name: quicktest
+
+paths:
+  cache_dir: ~/ksz2_21cm_runs/quicktest/cache
+  plot_dir:  ~/ksz2_21cm_runs/quicktest/plots
+
+simulation:
+  hii_dim: 32          # much smaller than fiducial's 128 — fast, not physical
+  box_len: 300
+  z_min: 5.0
+  z_max: 15.0           # narrower range — fast
+  n_threads: 4
+  random_seeds: [1, 2]  # 2 seeds instead of 20 — fast, no seed-scatter stats
+
+ksz:
+  z_obs: 5.0
+
+cross_correlation:
+  k_par_min: 0.01
+  delta_z: 2.0
+  z_chunk_centres: [8, 9]
+
+cosmology:
+  use: custom
+  H0: 67.77
+  Om0: 0.3086
+
+snr:
+  f_sky: 0.024
+  cmb_experiments: [SO]
+  radio_experiments: [HERA]

@@ -1,0 +1,63 @@
+# =============================================================================
+# fiducial.yaml — kSZ^2 x 21cm fiducial run configuration
+#
+# This replaces the old `run_config.py` (imported via `from run_config import *`
+# in kSZ_Squared_21cm_11Jun_CLUSTER.py). It is not a full drop-in: you need to
+# copy the ACTUAL values from your run_config.py into the fields below —
+# the values here are placeholders inferred from the pipeline code, not your
+# real fiducial run. Everything marked "# CHECK" should be verified against
+# your original run_config.py before this is used for a real run.
+#
+# Loaded by src/ksz2_21cm/utils/config.py -> load_config()
+# =============================================================================
+
+run_name: fiducial
+
+paths:
+  # CHECK — these were CACHE_DIR / PLOT_DIR in run_config.py. Can be overridden
+  # per-machine with the KSZ2_21CM_CACHE_DIR / KSZ2_21CM_PLOT_DIR env vars
+  # (see src/ksz2_21cm/utils/config.py) so the same config works on your laptop
+  # and on pride/swarm without editing this file.
+  cache_dir: ~/ksz2_21cm_runs/fiducial/cache
+  plot_dir:  ~/ksz2_21cm_runs/fiducial/plots
+
+# --- 21cmFAST lightcone parameters (heavy calls -> src/ksz2_21cm/simulate/) ---
+simulation:
+  hii_dim: 128          # CHECK — HII_DIM
+  box_len: 300          # CHECK — BOX_LEN [Mpc]
+  z_min: 5.0            # CHECK — Z_MIN
+  z_max: 35.0           # CHECK — Z_MAX
+  n_threads: 8          # CHECK — N_THREADS (per worker)
+  random_seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]   # CHECK — RANDOM_SEEDS
+
+# --- kSZ map construction ---
+ksz:
+  z_obs: 5.0             # CHECK — Z_OBS, end-of-reionization observation redshift
+
+# --- kSZ^2 x 21cm^2 cross-correlation (Zhou+25 style) ---
+cross_correlation:
+  k_par_min: 0.01        # CHECK — K_PAR_MIN, foreground high-pass filter [Mpc^-1 or h/Mpc — verify]
+  delta_z: 2.0           # CHECK — DELTA_Z, redshift chunk width
+  z_chunk_centres: [7, 8, 9, 10, 11]   # CHECK — Z_CHUNK_CENTRES
+
+# --- cosmology ---
+# NOTE: the existing pipeline uses FlatLambdaCDM(H0=67.77, Om0=0.3086) everywhere,
+# NOT astropy's Planck18 preset (H0=67.66, Om0=0.3111). These are close but not
+# identical. The ksz-pipeline repo standardised on Planck18. Decide once,
+# deliberately, whether ksz2-21cm should:
+#   (a) keep this project's existing custom cosmology (matches 21cmFAST defaults
+#       used when the lightcones/caches were generated — safest, no recompute), or
+#   (b) switch to Planck18 for consistency with ksz-pipeline (requires re-running
+#       everything downstream of the cosmology, since chi(z) and hence ell(k) shift).
+# Do not silently change this — see src/ksz2_21cm/utils/cosmology.py.
+cosmology:
+  use: custom            # "custom" or "planck18"
+  H0: 67.77
+  Om0: 0.3086
+
+# --- instrument / SNR forecast presets (see src/ksz2_21cm/noise/snr_forecast.py) ---
+snr:
+  f_sky: 0.024            # 1000 deg^2 SO x HERA/SKA overlap
+  cmb_experiments: [SO, CMBS4, CMBHD]
+  radio_experiments: [HERA, SKA]

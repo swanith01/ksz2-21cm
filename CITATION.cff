@@ -1,0 +1,14 @@
+# Placeholder — fill in before the repo is public. See https://citation-file-format.github.io/
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below."
+title: "ksz2-21cm: kSZ^2 x 21cm^2 cross-correlation forecasting pipeline"
+authors:
+  - family-names: Upadhye
+    given-names: Swanith
+    affiliation: "Tata Institute of Fundamental Research (TIFR)"
+  - family-names: Kulkarni
+    given-names: Girish
+    affiliation: "Tata Institute of Fundamental Research (TIFR)"
+version: 0.1.0
+date-released: "CHECK — fill in at v0.1 tag"
+repository-code: "https://github.com/swanith01/ksz2-21cm"

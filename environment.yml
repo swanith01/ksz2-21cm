@@ -1,0 +1,27 @@
+# =============================================================================
+# environment.yml — conda environment for ksz2-21cm
+#
+# CHECK: your existing scripts activate an env called "p21c_v3" on the
+# cluster (see the original overlay_zhou25.py docstring) — that's presumably
+# already got py21cmfast + everything else built and working. Renaming that
+# env to "ksz2-21cm" (or building a fresh one from this file) is your call;
+# don't let this file silently replace a working py21cmfast build. Building
+# py21cmfast from scratch can be finicky (needs gsl, fftw) — if `p21c_v3`
+# already works on pride/swarm, the path of least resistance is:
+#     conda create --name ksz2-21cm --clone p21c_v3
+#     conda env update -n ksz2-21cm -f environment.yml   # add the rest
+# =============================================================================
+name: ksz2-21cm
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - scipy
+  - matplotlib
+  - astropy
+  - h5py
+  - pyyaml
+  - pip
+  - pip:
+      - py21cmfast   # CHECK: version pinned to whatever produced your existing caches
