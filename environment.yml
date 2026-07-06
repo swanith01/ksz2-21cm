@@ -85,3 +85,15 @@ dependencies:
   - pip
   - pip:
       - pytest
+      - pygments
+      - tomli
+      - packaging
+      - exceptiongroup
+      # ^ these four were silently skipped during the original env creation:
+      # pip saw them "already satisfied" via ~/.local (the same user-site
+      # shadowing that broke matplotlib — see the PYTHONNOUSERSITE note
+      # above) and never actually installed them into this env. Once
+      # PYTHONNOUSERSITE=1 correctly isolates the env, pytest failed with
+      # ModuleNotFoundError for each in turn. Listed explicitly now so a
+      # fresh `conda env create` installs them for real regardless of
+      # what's sitting in any given machine's user-site.
