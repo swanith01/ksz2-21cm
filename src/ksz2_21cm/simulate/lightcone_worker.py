@@ -39,6 +39,26 @@ def run_or_load_seed(seed, seed_cache_dir, z_min, z_max,
 
     os.makedirs(seed_cache_dir, exist_ok=True)
 
+    # ── [FIX — found during desktop testing] ─────────────────────────────────
+    # py21cmfast derives its FFTW-wisdom / cache directory from a GLOBAL,
+    # machine-wide config value: config["direc"] (normally ~/21cmFAST-cache,
+    # stored in ~/.21cmfast/config.yml). On at least one desktop this value
+    # was corrupted to the literal string "<class 'pathlib.Path'>" — a
+    # py21cmfast first-run config bug, not something in this code — and
+    # py21cmfast's own wisdoms_path.mkdir() call has no exist_ok=True, so two
+    # seeds racing to create that same broken path for the first time throws
+    # FileExistsError for whichever loses the race. It may also explain a
+    # second symptom seen on the same run: a seed reporting "computed"
+    # successfully but no LightCone_*.h5 turning up in seed_cache_dir — if
+    # the global config is what actually controls where results land, it may
+    # not be seed_cache_dir at all.
+    #
+    # Fix: don't trust the machine-wide default. Force it to our own
+    # seed-specific directory before doing anything else. This also
+    # eliminates the race as a side effect, since no two seeds now share the
+    # same directory to fight over.
+    _p21c.config['direc'] = seed_cache_dir
+
     # ── Build py21cmfast params inside the subprocess ────────────────────────
     # CFFI objects cannot survive a fork reliably; always reconstruct them here.
     up = _p21c.UserParams(
@@ -76,15 +96,21 @@ def run_or_load_seed(seed, seed_cache_dir, z_min, z_max,
             user_params=up,
             astro_params=ap,
             random_seed=seed,
-            direc=seed_cache_dir,   # LightCone HDF5 goes into the per-seed dir
-            write=True,             # saves the LightCone HDF5
+            direc=seed_cache_dir,   # intermediate box cache goes in the per-seed dir
+            write=True,             # caches INTERMEDIATE boxes (init, perturb_field,
+                                    # etc.) for faster re-runs — NOT the final LightCone
         )
-        # FIX 7: do NOT call lc.save() again — write=True already saved it.
-        # Calling save() a second time is redundant and silently masks errors.
 
-        # Find the file that was just written
-        saved = sorted(glob.glob(os.path.join(seed_cache_dir, "LightCone_*.h5")))
-        cache_file = saved[0] if saved else None
+        # ── [FIX — the actual bug] ────────────────────────────────────────────
+        # Every py21cmfast tutorial example calls lightcone.save() EXPLICITLY,
+        # even when write=True was passed to run_lightcone — because write=True
+        # only controls intermediate-box caching, not the final LightCone file.
+        # The old code's "FIX 7" comment ("do NOT call lc.save() again —
+        # write=True already saved it") was wrong; that's exactly why every
+        # worker was reporting "computed" while writing no retrievable file
+        # anywhere. save() also conveniently returns the exact path it wrote
+        # to, so there's no need to glob-guess afterward.
+        cache_file = str(lc.save(direc=seed_cache_dir))
 
         sim_time = _time.time() - sim_start
         return (seed, cache_file, sim_time, "computed")
