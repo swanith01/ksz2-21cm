@@ -11,17 +11,77 @@
 #     conda create --name ksz2-21cm --clone p21c_v3
 #     conda env update -n ksz2-21cm -f environment.yml   # add the rest
 # =============================================================================
+# =============================================================================
+# environment.yml — conda environment for ksz2-21cm
+#
+# CHECK: your existing scripts activate an env called "p21c_v3" on the
+# cluster (see the original overlay_zhou25.py docstring) — that's presumably
+# already got py21cmfast + everything else built and working. Renaming that
+# env to "ksz2-21cm" (or building a fresh one from this file) is your call;
+# don't let this file silently replace a working py21cmfast build. If
+# `p21c_v3` already works on pride/swarm, the path of least resistance is:
+#     conda create --name ksz2-21cm --clone p21c_v3
+#     conda env update -n ksz2-21cm -f environment.yml   # add the rest
+#
+# NOTE on the 21cmFAST package name (this bit me the first time too):
+# the PyPI/conda package is called "21cmfast", but you `import py21cmfast`
+# in code. There is NO pip package literally named "py21cmfast" — installing
+# it via conda-forge (as below) is also more reliable than pip on a desktop,
+# since the conda-forge build pulls in its own GSL/FFTW rather than needing
+# `sudo apt install libgsl-dev libfftw3-dev` first.
+#
+# Pinned to 3.3.1 — confirmed via https://anaconda.org/conda-forge/21cmfast
+# that this is the newest version conda-forge actually offers (no v4 build
+# exists there at all, as of this check). This matches the v3 line your
+# "p21c_v3" cluster env and existing cache files are presumably from — but
+# it is NOT guaranteed to be the exact same patch version. If a run on this
+# desktop env produces numbers that don't match a cluster run with the same
+# config, a v3.x patch-version mismatch is one thing to rule out.
+# =============================================================================
+# CHANNEL GOTCHA: the `channels:` list below only applies when this file is
+# used to CREATE the env (`conda env create -f environment.yml`). Any later
+# ad hoc `conda install X` in an already-activated env ignores this file and
+# falls back to your global default channels — if that's "defaults" instead
+# of "conda-forge", you'll get bewildering unsatisfiable-solve errors from
+# mixing conda-forge and defaults package builds. Always be explicit for any
+# manual install into this env:
+#     conda install -c conda-forge <package>
+# or set it once for this env specifically:
+#     conda config --env --add channels conda-forge
+#     conda config --env --set channel_priority strict
+# =============================================================================
 name: ksz2-21cm
+# =============================================================================
+# DESKTOP GOTCHA (found the hard way, not fixed by anything in this file):
+# if `import py21cmfast` fails with AttributeError on plt.register_cmap even
+# after the matplotlib<3.9 pin above is correctly installed, check whether
+# your machine has a newer matplotlib sitting in ~/.local/lib/pythonX.Y/
+# site-packages/ (from a prior `pip install --user`) that's shadowing the
+# conda env's own copy — conda envs do NOT disable Python's user-site
+# mechanism by default (unlike venv). Diagnose with:
+#     python -c "import matplotlib; print(matplotlib.__file__)"
+# If that path is under ~/.local instead of this env's site-packages, fix by
+# adding a per-env activation hook (doesn't affect other envs or system
+# Python):
+#     mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+#     mkdir -p $CONDA_PREFIX/etc/conda/deactivate.d
+#     echo 'export PYTHONNOUSERSITE=1' > $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+#     echo 'unset PYTHONNOUSERSITE' > $CONDA_PREFIX/etc/conda/deactivate.d/env_vars.sh
+#     conda deactivate && conda activate ksz2-21cm
+# =============================================================================
 channels:
   - conda-forge
 dependencies:
   - python=3.10
   - numpy
   - scipy
-  - matplotlib
+  - matplotlib<3.9   # py21cmfast 3.3.1's plotting.py calls plt.register_cmap,
+                     # removed in matplotlib 3.9 (deprecated since 3.7) — found
+                     # the hard way when `import py21cmfast` raised AttributeError
   - astropy
   - h5py
   - pyyaml
+  - 21cmfast=3.3.1
   - pip
   - pip:
-      - py21cmfast   # CHECK: version pinned to whatever produced your existing caches
+      - pytest
