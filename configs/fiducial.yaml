@@ -23,13 +23,13 @@ paths:
 
 # --- 21cmFAST lightcone parameters (heavy calls -> src/ksz2_21cm/simulate/) ---
 simulation:
-  hii_dim: 128          # CHECK — HII_DIM
-  box_len: 300          # CHECK — BOX_LEN [Mpc]
-  z_min: 5.0            # CHECK — Z_MIN
-  z_max: 35.0           # CHECK — Z_MAX
-  n_threads: 8          # CHECK — N_THREADS (per worker)
+  hii_dim: 128            # CONFIRMED — from real run_config output, 2026-07-13
+  box_len: 800.0          # CONFIRMED — Mpc (was WRONG before: had 300)
+  z_min: 0.001            # CONFIRMED — was WRONG before: had 5.0
+  z_max: 20.0             # CONFIRMED — was WRONG before: had 35.0
+  n_threads: 32           # CONFIRMED — per worker (was WRONG before: had 8)
   random_seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-                 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]   # CHECK — RANDOM_SEEDS
+                 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]   # CONFIRMED
 
 # --- kSZ map construction ---
 ksz:
@@ -42,19 +42,23 @@ cross_correlation:
   z_chunk_centres: [7, 8, 9, 10, 11]   # CHECK — Z_CHUNK_CENTRES
 
 # --- cosmology ---
-# NOTE: the existing pipeline uses FlatLambdaCDM(H0=67.77, Om0=0.3086) everywhere,
-# NOT astropy's Planck18 preset (H0=67.66, Om0=0.3111). These are close but not
-# identical. The ksz-pipeline repo standardised on Planck18. Decide once,
-# deliberately, whether ksz2-21cm should:
-#   (a) keep this project's existing custom cosmology (matches 21cmFAST defaults
-#       used when the lightcones/caches were generated — safest, no recompute), or
-#   (b) switch to Planck18 for consistency with ksz-pipeline (requires re-running
-#       everything downstream of the cosmology, since chi(z) and hence ell(k) shift).
-# Do not silently change this — see src/ksz2_21cm/utils/cosmology.py.
+# CONFIRMED 2026-07-13 from a real run_config output on the cluster:
+# CosmoParams() was printed with NO override, meaning the actual production
+# lightcones used py21cmfast's own defaults:
+#     hlittle (h) = 0.6766   ->  H0 = 67.66
+#     OMm          = 0.30964144154550644
+# This is DIFFERENT from the FlatLambdaCDM(H0=67.77, Om0=0.3086) that was
+# hardcoded (and presumably hand-typed, not read from CosmoParams directly)
+# in overlay_zhou25.py and several other cells — small-looking differences,
+# but they feed chi(z) everywhere, i.e. every ell=k*chi(z) conversion in the
+# whole pipeline. Now using the CONFIRMED exact values below instead of the
+# approximation. If you find evidence a DIFFERENT cosmology was actually
+# used for some specific cached run, flag it — don't assume this one
+# retroactively applies to every existing cache file without checking.
 cosmology:
-  use: custom            # "custom" or "planck18"
-  H0: 67.77
-  Om0: 0.3086
+  use: custom
+  H0: 67.66
+  Om0: 0.30964144154550644
 
 # --- instrument / SNR forecast presets (see src/ksz2_21cm/noise/snr_forecast.py) ---
 snr:
