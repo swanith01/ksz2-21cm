@@ -33,7 +33,9 @@ from ksz2_21cm.simulate.lightcone_worker import run_or_load_seed
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="configs/fiducial.yaml")
-parser.add_argument("--threads-per-worker", type=int, default=8)
+parser.add_argument("--threads-per-worker", type=int, default=None,
+                    help="Override cfg['simulation']['n_threads']. If not "
+                         "given, uses the config value.")
 args = parser.parse_args()
 
 cfg = load_config(args.config)
@@ -53,7 +55,9 @@ print(f"Seeds: {RANDOM_SEEDS}  (N={N_SEEDS})")
 
 # ── Core / worker allocation ─────────────────────────────────────────────────
 N_TOTAL_CORES = int(os.environ.get('PBS_NCPUS', os.cpu_count() or 32))
-DESIRED_THREADS_PER_WORKER = args.threads_per_worker
+DESIRED_THREADS_PER_WORKER = (args.threads_per_worker
+                              if args.threads_per_worker is not None
+                              else cfg["simulation"]["n_threads"])
 N_WORKERS = max(1, N_TOTAL_CORES // DESIRED_THREADS_PER_WORKER)
 N_WORKERS = min(N_WORKERS, N_SEEDS)
 

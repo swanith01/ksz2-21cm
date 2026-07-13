@@ -1,0 +1,47 @@
+# =============================================================================
+# timing_test.yaml — real fiducial physics parameters (HII_DIM=128,
+# BOX_LEN=800, full z range), but only 2 seeds instead of 20.
+#
+# Purpose: measure real per-seed lightcone generation time at fiducial
+# resolution on THIS cluster's hardware, before sizing the full 20-seed
+# job's walltime request. Not a real science run — just a stopwatch.
+#
+# CHECK: standalone copy of fiducial.yaml (no config inheritance wired up
+# yet — see quicktest.yaml's header for the same note). Keep in sync by
+# hand if fiducial.yaml's physics parameters change.
+# =============================================================================
+
+run_name: timing_test
+
+paths:
+  cache_dir: runs/timing_test/cache
+  plot_dir:  runs/timing_test/plots
+
+simulation:
+  hii_dim: 128
+  box_len: 800.0
+  z_min: 0.001
+  z_max: 20.0
+  n_threads: 32
+  random_seeds: [1, 2]   # only 2 -- this is a timing test, not a real run
+
+ksz:
+  z_obs: 5.0             # CHECK -- still unconfirmed, see fiducial.yaml.
+                          # Unused by 01_run_lightcones.py anyway (only
+                          # needed from 02_compute_ksz_maps.py onward),
+                          # so irrelevant for this timing test specifically.
+
+cross_correlation:
+  k_par_min: 0.01         # CHECK -- unconfirmed, unused by this timing test
+  delta_z: 2.0             # CHECK -- unconfirmed, unused by this timing test
+  z_chunk_centres: [7, 8, 9, 10, 11]   # CHECK -- unconfirmed, unused here
+
+cosmology:
+  use: custom
+  H0: 67.66
+  Om0: 0.30964144154550644
+
+snr:
+  f_sky: 0.024
+  cmb_experiments: [SO]
+  radio_experiments: [HERA]

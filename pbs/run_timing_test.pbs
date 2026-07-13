@@ -1,0 +1,71 @@
+#!/bin/bash
+# ============================================================
+# PBS: ksz2-21cm timing test (real resolution, 2 seeds, lightcones only)
+#
+# Purpose: measure real per-seed lightcone generation time at fiducial
+# resolution (HII_DIM=128, BOX_LEN=800, full z=[0.001,20]) on this
+# cluster's actual hardware, BEFORE sizing the full 20-seed fiducial
+# job's walltime request. Not a science run.
+#
+# Resource sizing: ncpus=32, mem=128gb matches
+# ~/stray_code/kSZ_pipeline_dev/run_boxsize_convergence.pbs exactly --
+# a PROVEN working size for a single HII_DIM=128 lightcone on this
+# cluster, so this isn't a guess for the per-seed resource footprint.
+#
+# With n_threads=32 (confirmed real value) and ncpus=32 requested, workers
+# = 32/32 = 1 -- the 2 seeds run ONE AT A TIME, not concurrently. This is
+# deliberate: sequential timing gives a clean, uncontended per-seed
+# measurement to extrapolate from, rather than two seeds competing for the
+# same 32 cores and giving a muddier number.
+#
+# Walltime (48h) IS a guess, but a safety CEILING, not an estimate -- we
+# are using PBS as a stopwatch here. If it finishes well within 48h, great,
+# that's our answer. If it's still running near the ceiling, that's also
+# real information (means the full 20-seed job needs to be planned very
+# differently -- possibly as several smaller jobs rather than one).
+# ============================================================
+#PBS -N ksz2_21cm_timing_test
+#PBS -q workq
+#PBS -l walltime=48:00:00
+#PBS -l select=1:ncpus=32:mem=128gb
+#PBS -j oe
+#PBS -o /user1/swanith/ksz2-21cm-logs/ksz2_21cm_timing_test_2026-07-13.log
+
+# ── Safety ───────────────────────────────────────────────────
+set -euo pipefail
+
+# ── Logging helper ───────────────────────────────────────────
+echo "=============================================="
+echo "Job ID       : $PBS_JOBID"
+echo "Job name     : $PBS_JOBNAME"
+echo "Queue        : $PBS_QUEUE"
+echo "Submitted by : $PBS_O_LOGNAME"
+echo "Work dir     : $PBS_O_WORKDIR"
+echo "Node list    : $(cat $PBS_NODEFILE)"
+echo "Start time   : $(date)"
+echo "=============================================="
+
+# ── Activate conda environment ────────────────────────────────
+source /user1/swanith/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+echo "Python       : $(which python)"
+echo "Version      : $(python --version)"
+echo "py21cmfast   : $(python -c 'import py21cmfast; print(py21cmfast.__version__)')"
+echo "----------------------------------------------"
+
+# ── OMP threads (match ncpus above) ──────────────────────────
+export OMP_NUM_THREADS=32
+
+# ── Change to the repo (CHECK this path matches your actual clone location) ──
+cd /user1/swanith/ksz2-21cm
+echo "Repo HEAD    : $(git rev-parse --short HEAD)"
+echo "----------------------------------------------"
+
+# ── Run: lightcone generation ONLY, at real resolution, 2 seeds ─────────────
+echo ">>> 01_run_lightcones.py (timing_test.yaml -- real resolution, 2 seeds)"
+time python scripts/01_run_lightcones.py --config configs/variants/timing_test.yaml
+
+echo "----------------------------------------------"
+echo "End time : $(date)"
+echo "Done. Check the 'time' output above and resources_used.walltime via"
+echo "'qstat -xf <jobid>' after this finishes for the real per-seed number."
