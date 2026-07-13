@@ -1,0 +1,97 @@
+#!/bin/bash
+# ============================================================
+# PBS: ksz2-21cm quicktest validation run
+#
+# Purpose: this is the FIRST PBS job for this repo. It validates two
+# things at once, since interactive testing on the login node isn't
+# allowed on this cluster:
+#   1. PBS submission mechanics work (env activation, working directory,
+#      resource allocation) for this repo specifically.
+#   2. The pipeline code itself actually runs correctly on THIS cluster's
+#      filesystem/hardware, not just on desktop.
+#
+# Deliberately small/fast (HII_DIM=32, 2 seeds, configs/variants/quicktest.yaml)
+# — this is a smoke test, not a real science run. Once this succeeds, build
+# a separate, much larger job for configs/fiducial.yaml (real science
+# resources, likely a much longer walltime — don't reuse this job's small
+# resource request for that).
+#
+# Modeled directly on ~/stray_code/kSZ_pipeline_dev/run_boxsize_convergence.pbs
+# (queue name, resource syntax, conda activation, logging pattern all
+# copied from that working script).
+# ============================================================
+#PBS -N ksz2_21cm_quicktest
+#PBS -q workq
+#PBS -l walltime=01:00:00
+#PBS -l select=1:ncpus=4:mem=16gb
+#PBS -j oe
+#PBS -o /user1/swanith/logs/ksz2_21cm_quicktest.log
+
+# ── Safety ───────────────────────────────────────────────────
+set -euo pipefail
+
+# ── Logging helper ───────────────────────────────────────────
+echo "=============================================="
+echo "Job ID       : $PBS_JOBID"
+echo "Job name     : $PBS_JOBNAME"
+echo "Queue        : $PBS_QUEUE"
+echo "Submitted by : $PBS_O_LOGNAME"
+echo "Work dir     : $PBS_O_WORKDIR"
+echo "Node list    : $(cat $PBS_NODEFILE)"
+echo "Start time   : $(date)"
+echo "=============================================="
+
+# ── Activate conda environment ────────────────────────────────
+source /user1/swanith/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+echo "Python       : $(which python)"
+echo "Version      : $(python --version)"
+echo "py21cmfast   : $(python -c 'import py21cmfast; print(py21cmfast.__version__)')"
+echo "matplotlib   : $(python -c 'import matplotlib; print(matplotlib.__version__)')"
+echo "----------------------------------------------"
+
+# ── OMP threads (match ncpus above) ──────────────────────────
+export OMP_NUM_THREADS=4
+
+# ── Change to the repo (CHECK this path matches your actual clone location) ──
+cd /user1/swanith/ksz2-21cm
+mkdir -p logs
+
+echo "Repo HEAD    : $(git rev-parse --short HEAD)"
+echo "----------------------------------------------"
+
+# ── Run the full quicktest pipeline, in order ─────────────────
+# set -e above means this stops immediately on the first failure, rather
+# than continuing with broken/partial data — the log will show exactly
+# which stage broke, if any does.
+
+echo ">>> Sanity checks (no py21cmfast needed for this part)"
+python -m pytest tests/
+
+echo ">>> 01_run_lightcones.py"
+python scripts/01_run_lightcones.py --config configs/variants/quicktest.yaml
+
+echo ">>> 02_compute_ksz_maps.py"
+python scripts/02_compute_ksz_maps.py --config configs/variants/quicktest.yaml
+
+echo ">>> 03_compute_cross_corr.py"
+python scripts/03_compute_cross_corr.py --config configs/variants/quicktest.yaml
+
+echo ">>> 04_compute_cross_corr_sq.py"
+python scripts/04_compute_cross_corr_sq.py --config configs/variants/quicktest.yaml
+
+echo ">>> 06_compute_cross_corr_raw.py"
+python scripts/06_compute_cross_corr_raw.py --config configs/variants/quicktest.yaml
+
+echo ">>> Figure scripts"
+python paper/figure_scripts/overlay_zhou25.py --config configs/variants/quicktest.yaml
+python paper/figure_scripts/shape_comparison_zhou25.py --config configs/variants/quicktest.yaml
+python paper/figure_scripts/ksz_raw_x_21cm.py --config configs/variants/quicktest.yaml
+
+# Deliberately NOT running 05_compute_snr_forecast.py here — its full-
+# covariance estimator needs >=4 seeds, meaningless at quicktest's 2 seeds.
+# That gets its own real test once we're running fiducial.yaml.
+
+echo "----------------------------------------------"
+echo "End time : $(date)"
+echo "Done."
