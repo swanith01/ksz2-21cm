@@ -2,11 +2,16 @@
 # fiducial.yaml — kSZ^2 x 21cm fiducial run configuration
 #
 # This replaces the old `run_config.py` (imported via `from run_config import *`
-# in kSZ_Squared_21cm_11Jun_CLUSTER.py). It is not a full drop-in: you need to
-# copy the ACTUAL values from your run_config.py into the fields below —
-# the values here are placeholders inferred from the pipeline code, not your
-# real fiducial run. Everything marked "# CHECK" should be verified against
-# your original run_config.py before this is used for a real run.
+# in kSZ_Squared_21cm_11Jun_CLUSTER.py).
+#
+# STATUS (2026-07-14): all science-relevant values now CONFIRMED, not
+# placeholders -- HII_DIM/BOX_LEN/z_min/z_max/n_threads/seeds directly
+# from a real run_config.py paste; cosmology from a real printed
+# CosmoParams() output; k_par_min/delta_z from consistent Zhou+25-matching
+# labels across your own plots; z_chunk_centres from visual evidence in
+# your own shape-comparison plot; z_obs measured directly via
+# scripts/find_z_obs.py against real cached lightcones. See each field's
+# own comment for the specific evidence behind it.
 #
 # Loaded by src/ksz2_21cm/utils/config.py -> load_config()
 # =============================================================================
@@ -14,12 +19,18 @@
 run_name: fiducial
 
 paths:
-  # CHECK — these were CACHE_DIR / PLOT_DIR in run_config.py. Can be overridden
-  # per-machine with the KSZ2_21CM_CACHE_DIR / KSZ2_21CM_PLOT_DIR env vars
-  # (see src/ksz2_21cm/utils/config.py) so the same config works on your laptop
-  # and on pride/swarm without editing this file.
-  cache_dir: ~/ksz2_21cm_runs/fiducial/cache
-  plot_dir:  ~/ksz2_21cm_runs/fiducial/plots
+  # CONFIRMED naming approach (not the exact path -- adjust if you'd
+  # rather it live somewhere else): deliberately OUTSIDE the repo
+  # checkout, unlike runs/quicktest and runs/timing_test. This is real
+  # science data -- 20 seeds, hours of real compute -- not disposable
+  # test output, so it shouldn't share a "safe to rm -rf" mental model
+  # with the throwaway configs. Stable, project-named (not dated),
+  # matching the ksz2-21cm-logs/ convention that already worked well.
+  # Can be overridden per-machine with the KSZ2_21CM_CACHE_DIR /
+  # KSZ2_21CM_PLOT_DIR env vars (see src/ksz2_21cm/utils/config.py)
+  # without editing this file.
+  cache_dir: ~/ksz2-21cm-data/fiducial/cache
+  plot_dir:  ~/ksz2-21cm-data/fiducial/plots
 
 # --- 21cmFAST lightcone parameters (heavy calls -> src/ksz2_21cm/simulate/) ---
 simulation:
@@ -33,11 +44,13 @@ simulation:
 
 # --- kSZ map construction ---
 ksz:
-  z_obs: 5.0             # STILL PENDING — run scripts/find_z_obs.py against
-                          # real cached lightcones (e.g. timing_test's) and
-                          # set this to z(x_e~0.9999), the patchy-reionization
-                          # completion redshift. Current value is a
-                          # placeholder, not yet a measurement.
+  z_obs: 4.718            # CONFIRMED — measured via scripts/find_z_obs.py
+                          # against real HII_DIM=128/BOX_LEN=800 lightcones
+                          # (timing_test's 2 seeds): z(x_e=0.9999) = 4.718
+                          # +/- 0.010. Patchy-reionization-completion
+                          # redshift, per your own criterion (99.99%
+                          # ionized) -- stops kSZ integration right where
+                          # patchy signal ends, before late-time/OV kSZ.
 
 # --- kSZ^2 x 21cm^2 cross-correlation (Zhou+25 style) ---
 cross_correlation:
