@@ -33,13 +33,26 @@ simulation:
 
 # --- kSZ map construction ---
 ksz:
-  z_obs: 5.0             # CHECK — Z_OBS, end-of-reionization observation redshift
+  z_obs: 5.0             # STILL PENDING — run scripts/find_z_obs.py against
+                          # real cached lightcones (e.g. timing_test's) and
+                          # set this to z(x_e~0.9999), the patchy-reionization
+                          # completion redshift. Current value is a
+                          # placeholder, not yet a measurement.
 
 # --- kSZ^2 x 21cm^2 cross-correlation (Zhou+25 style) ---
 cross_correlation:
-  k_par_min: 0.01        # CHECK — K_PAR_MIN, foreground high-pass filter [Mpc^-1 or h/Mpc — verify]
-  delta_z: 2.0           # CHECK — DELTA_Z, redshift chunk width
-  z_chunk_centres: [7, 8, 9, 10, 11]   # CHECK — Z_CHUNK_CENTRES
+  k_par_min: 0.01        # CONFIRMED — matches k_||,0=0.01 labeled consistently
+                          # across every one of your own Zhou+25 comparison
+                          # plots and scripts, chosen to match Zhou+25's own
+                          # convention for direct comparison.
+  delta_z: 2.0            # CONFIRMED — same reasoning as k_par_min above
+                          # (Delta z=2 labeled consistently everywhere).
+  z_chunk_centres: [6, 7, 8, 9, 10, 11]   # UPDATED from visual evidence: your
+                          # own "shape comparison" plot (B_Dell_vs_z_shape.png)
+                          # shows redshift ticks at 11,10,9,8,7,6 -- six
+                          # points, not the five previously guessed here.
+                          # Reasonably confident, not 100% certain -- if you
+                          # find the original run_config.py value, prefer it.
 
 # --- cosmology ---
 # CONFIRMED 2026-07-13 from a real run_config output on the cluster:
