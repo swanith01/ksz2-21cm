@@ -1,0 +1,22 @@
+#!/bin/bash
+# ============================================================
+# PBS: find z_obs from real cached lightcones (timing_test's)
+# Quick diagnostic, not a science run -- reads cached metadata only,
+# no new py21cmfast simulation.
+# ============================================================
+#PBS -N ksz2_21cm_find_z_obs
+#PBS -q workq
+#PBS -l walltime=00:15:00
+#PBS -l select=1:ncpus=2:mem=8gb
+#PBS -j oe
+#PBS -o /user1/swanith/ksz2-21cm-logs/ksz2_21cm_find_z_obs_2026-07-14.log
+
+set -euo pipefail
+
+source /user1/swanith/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+
+cd /user1/swanith/ksz2-21cm
+echo "Repo HEAD: $(git rev-parse --short HEAD)"
+
+python scripts/find_z_obs.py --config configs/variants/timing_test.yaml
