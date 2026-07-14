@@ -1,0 +1,106 @@
+#!/bin/bash
+# ============================================================
+# PBS: ksz2-21cm FIDUCIAL run — full 20 seeds, real resolution
+# (HII_DIM=128, BOX_LEN=800, z=[0.001,20])
+#
+# This is the real science run — first full-scale execution of the
+# restructured pipeline. Deliberately does NOT include
+# 05_compute_snr_forecast.py, which has never been tested at any scale
+# (not desktop, not quicktest, nowhere) and does meaningfully more
+# computation (noise realizations, full covariance matrix, SVD) than
+# anything timed so far. Run that as its own follow-up job once the core
+# cross-correlation results here are checked and trusted.
+#
+# Resource sizing: ncpus=32, mem=128gb — same as the timing test that
+# just ran successfully on this exact config (minus seed count).
+#
+# Walltime (8h) is padded from REAL measured data, not a guess:
+#   - timing_test.pbs measured 3.46 min/seed for lightcone generation
+#     at this exact resolution, sequential (1 worker, 32 threads/seed)
+#   - 20 seeds x 3.46 min, padded 3x for seed-to-seed variance: ~3.5h
+#   - everything else (kSZ maps, both cross-correlations, figures) is
+#     pure numpy/FFT, no py21cmfast physics calls -- budgeted ~1h,
+#     generously, at real resolution
+#   - total estimate ~4.5h; 8h requested for real margin without the
+#     wastefulness of another 72h-style guess
+#
+# If this runs out of walltime anyway: NOT a disaster. Every stage
+# checks its own cache before recomputing (lightcones, kSZ maps, both
+# cross-correlations), so resubmitting this exact script picks up
+# exactly where it left off rather than starting over.
+# ============================================================
+#PBS -N ksz2_21cm_fiducial
+#PBS -q workq
+#PBS -l walltime=08:00:00
+#PBS -l select=1:ncpus=32:mem=128gb
+#PBS -j oe
+#PBS -o /user1/swanith/ksz2-21cm-logs/ksz2_21cm_fiducial_2026-07-14.log
+
+# ── Safety ───────────────────────────────────────────────────
+set -euo pipefail
+
+# ── Logging helper ───────────────────────────────────────────
+echo "=============================================="
+echo "Job ID       : $PBS_JOBID"
+echo "Job name     : $PBS_JOBNAME"
+echo "Queue        : $PBS_QUEUE"
+echo "Submitted by : $PBS_O_LOGNAME"
+echo "Work dir     : $PBS_O_WORKDIR"
+echo "Node list    : $(cat $PBS_NODEFILE)"
+echo "Start time   : $(date)"
+echo "=============================================="
+
+# ── Activate conda environment ────────────────────────────────
+source /user1/swanith/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+echo "Python       : $(which python)"
+echo "Version      : $(python --version)"
+echo "py21cmfast   : $(python -c 'import py21cmfast; print(py21cmfast.__version__)')"
+echo "matplotlib   : $(python -c 'import matplotlib; print(matplotlib.__version__)')"
+echo "----------------------------------------------"
+
+# ── OMP threads (match ncpus above) ──────────────────────────
+export OMP_NUM_THREADS=32
+
+# ── Change to the repo (CHECK this path matches your actual clone location) ──
+cd /user1/swanith/ksz2-21cm
+echo "Repo HEAD    : $(git rev-parse --short HEAD)"
+echo "----------------------------------------------"
+
+# ── Run the core fiducial pipeline, in order ───────────────────
+# set -e above means this stops immediately on the first failure --
+# check the log to see exactly which stage broke, if any does. Every
+# stage below is cache-aware, so resubmitting this script after a
+# partial failure or walltime cutoff is always safe and non-wasteful.
+
+echo ">>> Sanity checks"
+python -m pytest tests/
+
+echo ">>> 01_run_lightcones.py (real resolution, 20 seeds)"
+time python scripts/01_run_lightcones.py --config configs/fiducial.yaml
+
+echo ">>> 02_compute_ksz_maps.py"
+time python scripts/02_compute_ksz_maps.py --config configs/fiducial.yaml
+
+echo ">>> 03_compute_cross_corr.py"
+time python scripts/03_compute_cross_corr.py --config configs/fiducial.yaml
+
+echo ">>> 04_compute_cross_corr_sq.py"
+time python scripts/04_compute_cross_corr_sq.py --config configs/fiducial.yaml
+
+echo ">>> 06_compute_cross_corr_raw.py"
+time python scripts/06_compute_cross_corr_raw.py --config configs/fiducial.yaml
+
+echo ">>> Figure scripts (non-SNR only)"
+python paper/figure_scripts/overlay_zhou25.py --config configs/fiducial.yaml
+python paper/figure_scripts/shape_comparison_zhou25.py --config configs/fiducial.yaml
+python paper/figure_scripts/ksz_raw_x_21cm.py --config configs/fiducial.yaml
+
+# Deliberately NOT running 05_compute_snr_forecast.py -- see header.
+# Deliberately NOT running run_zhou25_fig5.py -- redundant with
+# overlay_zhou25.py's Plot B (same D_ell vs z content); revisit only if
+# you specifically want that exact Fig.5-style single-panel layout.
+
+echo "----------------------------------------------"
+echo "End time : $(date)"
+echo "Done."
