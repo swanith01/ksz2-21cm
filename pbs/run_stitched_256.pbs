@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N stitched_256
+#PBS -q workq
+#PBS -l select=1:ncpus=32:mem=64gb
+#PBS -l walltime=24:00:00
+#PBS -o logs/stitched_256.out
+#PBS -e logs/stitched_256.err
+
+cd $PBS_O_WORKDIR
+mkdir -p logs
+
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+
+export OMP_NUM_THREADS=32
+
+echo "=== 01: stitch lightcones ==="
+python scripts/01_stitch_lightcones.py --config configs/variants/stitched_256.yaml
+
+echo "=== 02: compute kSZ maps ==="
+python scripts/02_compute_ksz_maps_stitched.py --config configs/variants/stitched_256.yaml
+
+echo "=== 04: cross-correlation ==="
+python scripts/04_compute_cross_corr_sq_stitched.py --config configs/variants/stitched_256.yaml
+
+echo "=== DONE ==="
