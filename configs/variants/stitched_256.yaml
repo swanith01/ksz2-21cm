@@ -1,0 +1,102 @@
+# =============================================================================
+# stitched_256.yaml — first cross-correlation pass on the vendored,
+# box-stitched kSZ construction (replaces native run_lightcone() with
+# ksz-pipeline's validated stitch_lightcone_from_coeval(), extended to also
+# carry brightness_temp -- see src/ksz2_21cm/simulate/stitch_from_coeval.py).
+#
+# A separate variant, not an edit to fiducial.yaml: fiducial.yaml's existing
+# cached cross_corr_sq_seed*.npy results (HII_DIM=128, native lightcone) stay
+# reproducible and comparable against this new pathway's output -- see the
+# 2026-10-06 chat log for why an old-vs-new diff at the same astro params is
+# the first sanity check to run once this produces real output.
+#
+# Resolution/box choice (2026-10-06 decision): 800 Mpc / 256^3 coeval boxes
+# -- cheap enough for repeated iteration on a shared, storage-limited
+# cluster, and resolution convergence was seen at ell<=1000-2000 in the
+# ksz-pipeline dz/resolution convergence work, which covers Zhou+25's own
+# signal range (peaks ell~400-800, fading by ell~1600). The 512^3 pass
+# ksz-pipeline validated its off-diagonal estimator at is a later,
+# amplitude-confidence-only step -- not needed for this first shape pass.
+#
+# z_snapshots: vendored verbatim from ksz-pipeline's own fiducial.yaml
+# (coeval_ksz.z_snapshots) -- the same 29-point z=20->4 grid the dz-
+# convergence work found adequate ("number of snapshots... of the order of
+# fiducial" per the 2026-10-06 discussion). Do not thin this list without
+# rechecking that finding.
+# =============================================================================
+
+run_name: stitched_256
+
+paths:
+  # Deliberately outside the repo, same reasoning as fiducial.yaml -- this
+  # produces real (if smaller-resolution) science cache, not a throwaway
+  # smoke test. A SEPARATE directory from fiducial/ so nothing here can
+  # collide with or overwrite the existing native-lightcone cache.
+  cache_dir: ~/ksz2-21cm-data/stitched_256/cache
+  plot_dir:  ~/ksz2-21cm-data/stitched_256/plots
+
+simulation:
+  hii_dim: 256             # NEW for this pass -- matches coeval_ksz.hii_dim
+                            # below; this is also the transverse pixel grid
+                            # for the resulting 2D kSZ/21cm maps.
+  box_len: 800.0            # unchanged from fiducial.yaml
+  z_min: 0.001               # kept for consistency with the config schema's
+                            # required keys / any script that still reads it
+                            # (e.g. a future SNR forecast); NOT used by the
+                            # stitched path itself -- see coeval_ksz.z_snapshots
+                            # and analytic_tau_below() for how tau(z<4) is
+                            # actually handled (see ksz module docstrings).
+  z_max: 20.0
+  n_threads: 32
+  random_seeds: [1, 2, 3]   # START SMALL -- 3 seeds, per the 2026-10-06 plan
+                            # ("a handful (3-5) to sanity check before
+                            # committing to a bigger ensemble"). Widen once
+                            # the registration/shape check against the old
+                            # native-lightcone result looks right.
+
+# --- kSZ map construction (stitched path) ---
+ksz:
+  # No single z_obs here -- the stitched path integrates the full
+  # z_snapshots window and uses optical_depth.compute_patchy_mask() (an
+  # x_e-threshold cut, 99.99% neutral to 0.01% neutral) to clip the SIGNAL
+  # integral to the patchy regime, rather than a hardcoded cutoff redshift.
+  # Kept here only because load_config() requires the key to exist;
+  # 02_compute_ksz_maps_stitched.py does not read it.
+  z_obs: 4.718
+
+coeval_ksz:
+  # Vendored verbatim from ksz-pipeline configs/fiducial.yaml.
+  z_snapshots: [20.0, 19.0, 18.0, 17.0, 16.0, 15.5, 15.0, 14.5, 14.0, 13.5,
+                13.0, 12.5, 12.0, 11.5, 11.0, 10.5, 10.0,  9.5,  9.0,  8.5,
+                 8.0,  7.5,  7.0,  6.5,  6.0,  5.5,  5.0,  4.5,  4.0]
+  hii_dim: 256               # coeval box resolution; must equal simulation.hii_dim
+                            # above since stitch_lightcone_from_coeval assembles
+                            # the 2D map at this same transverse grid.
+  box_len: 800.0
+
+# --- kSZ^2 x 21cm^2 cross-correlation (Zhou+25 style) -- unchanged logic ---
+cross_correlation:
+  k_par_min: 0.01
+  delta_z: 2.0
+  z_chunk_centres: [6, 7, 8, 9, 10, 11]
+
+# --- cosmology ---
+# NOTE: this cfg value feeds get_cosmology(cfg) -> FlatLambdaCDM(H0=67.66,
+# Om0=0.30964144154550644), used by the cross-corr worker's ell=k*chi(z0)
+# step. The VENDORED stitching/velocity/tau modules (simulate/stitch_
+# from_coeval.py etc.) separately hardcode astropy's literal Planck18
+# preset (H0=67.66, Om0=0.30966...) at import time -- NOT this cfg value.
+# The two differ in Om0 at the ~2e-5 level, negligible next to every other
+# systematic already flagged in this pipeline, but real and worth stating
+# plainly rather than leaving implicit -- don't "fix" this by threading cfg
+# through the vendored files without deciding that's worth diverging
+# further from upstream ksz-pipeline for.
+cosmology:
+  use: custom
+  H0: 67.66
+  Om0: 0.30964144154550644
+
+snr:
+  f_sky: 0.024
+  cmb_experiments: [SO]
+  radio_experiments: [HERA]
