@@ -47,7 +47,9 @@ simulation:
                             # and analytic_tau_below() for how tau(z<4) is
                             # actually handled (see ksz module docstrings).
   z_max: 20.0
-  n_threads: 32
+  n_threads: 16             # 2026-10-07: was 32; a 32-core single-node request sat
+                            # queued >18h on swarm (only ~4 free cores cluster-wide).
+                            # Must match ncpus in pbs/run_stitched_256.pbs.
   random_seeds: [1, 2, 3]   # START SMALL -- 3 seeds, per the 2026-10-06 plan
                             # ("a handful (3-5) to sanity check before
                             # committing to a bigger ensemble"). Widen once
@@ -78,7 +80,9 @@ coeval_ksz:
 cross_correlation:
   k_par_min: 0.01
   delta_z: 2.0
-  z_chunk_centres: [6, 7, 8, 9, 10, 11]
+  z_chunk_centres: [5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5]
+  # 2026-10-07: was integer steps 6-11. Zhou+25's feature spans only z0~9 (peak)
+  # to z0~7.6 (minimum), so 0.5 spacing resolves it. Only script 04 reads this.
 
 # --- cosmology ---
 # NOTE: this cfg value feeds get_cosmology(cfg) -> FlatLambdaCDM(H0=67.66,

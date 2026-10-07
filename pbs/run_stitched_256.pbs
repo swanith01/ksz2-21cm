@@ -1,10 +1,16 @@
 #!/bin/bash
 #PBS -N stitched_256
 #PBS -q workq
-#PBS -l select=1:ncpus=32:mem=64gb
-#PBS -l walltime=24:00:00
+#PBS -l select=1:ncpus=16:mem=48gb
+#PBS -l walltime=48:00:00
 #PBS -o logs/stitched_256.out
 #PBS -e logs/stitched_256.err
+
+# 2026-10-07: reduced from ncpus=32 (queued >18h on swarm). n_threads in
+# configs/variants/stitched_256.yaml is 16 to match. Seeds run serially
+# (N_WORKERS = 16//16 = 1); walltime raised to 48h since per-seed time at
+# 256^3 x 29 snapshots is not yet measured. Check logs/stitched_256.out for
+# the first "computed in X min" line and tighten next time.
 
 cd $PBS_O_WORKDIR
 mkdir -p logs
@@ -12,7 +18,7 @@ mkdir -p logs
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ksz2-21cm
 
-export OMP_NUM_THREADS=32
+export OMP_NUM_THREADS=16
 
 echo "=== 01: stitch lightcones ==="
 python scripts/01_stitch_lightcones.py --config configs/variants/stitched_256.yaml
