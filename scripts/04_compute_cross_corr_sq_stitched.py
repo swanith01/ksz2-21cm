@@ -33,13 +33,15 @@ from ksz2_21cm.correlation.cross_corr_sq_worker_stitched import (
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="configs/variants/stitched_256.yaml")
+parser.add_argument("--seeds", type=int, nargs="+", default=None,
+                    help="process only these seeds (default: all seeds in the config)")
 args = parser.parse_args()
 
 cfg = load_config(args.config)
 ensure_dirs(cfg)
 
 cache_dir       = cfg["paths"]["cache_dir"]
-RANDOM_SEEDS    = cfg["simulation"]["random_seeds"]
+RANDOM_SEEDS    = args.seeds if args.seeds else cfg["simulation"]["random_seeds"]
 HII_DIM         = cfg["simulation"]["hii_dim"]
 BOX_LEN         = cfg["simulation"]["box_len"]
 k_par_min       = cfg["cross_correlation"]["k_par_min"]

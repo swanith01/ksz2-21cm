@@ -44,6 +44,11 @@ from ksz2_21cm.plotting.style import apply_global_style, save_pdf_png
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="configs/variants/stitched_256.yaml")
+parser.add_argument("--seeds", type=int, nargs="+", default=None,
+                    help="process only these seeds (default: all seeds in the config)")
+parser.add_argument("--no-plots", action="store_true",
+                    help="skip the ensemble diagnostic plots (use for per-seed/partial runs so they "
+                         "do not overwrite the all-seed plots; run once without it at the end)")
 args = parser.parse_args()
 
 cfg = load_config(args.config)
@@ -52,7 +57,7 @@ apply_global_style()
 
 cache_dir    = cfg["paths"]["cache_dir"]
 plot_dir     = cfg["paths"]["plot_dir"]
-RANDOM_SEEDS = cfg["simulation"]["random_seeds"]
+RANDOM_SEEDS = args.seeds if args.seeds else cfg["simulation"]["random_seeds"]
 
 # GUARD: the stitched arrays were built at coeval_ksz.hii_dim/box_len (see
 # 01_stitch_lightcones.py); nothing downstream re-derives pixel geometry
@@ -135,6 +140,10 @@ print(f"\n✓ kSZ maps ready: {len(kSZ_maps)}/{N_SEEDS} seeds")
 print(f"  Mean tau = {tau_totals.mean():.6f} ± {tau_totals.std():.6f}")
 print(f"  (compare against the native-lightcone pathway's tau_total from "
       f"02_compute_ksz_maps.py at the same astro params, as a sanity check)")
+
+if args.no_plots:
+    print("--no-plots: skipping ensemble diagnostic plots.")
+    sys.exit(0)
 
 # ── Diagnostic plots: reionization history + tau(z) ──────────────────────────
 ref_seed  = next(iter(stitched))

@@ -50,11 +50,12 @@ simulation:
   n_threads: 16             # 2026-10-07: was 32; a 32-core single-node request sat
                             # queued >18h on swarm (only ~4 free cores cluster-wide).
                             # Must match ncpus in pbs/run_stitched_256.pbs.
-  random_seeds: [1, 2, 3]   # START SMALL -- 3 seeds, per the 2026-10-06 plan
-                            # ("a handful (3-5) to sanity check before
-                            # committing to a bigger ensemble"). Widen once
-                            # the registration/shape check against the old
-                            # native-lightcone result looks right.
+  random_seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+                            # 2026-10-10: widened from 3 to 15. Seeds 1-3 are already
+                            # stitched; scripts 01/02/04 skip cached seeds, and 05/06
+                            # skip any seed whose output is missing, so partial progress
+                            # is fine. Run new seeds with: --seeds 4 5 6 ...
+                            # (see pbs/run_stitched_seeds.pbs).
 
 # --- kSZ map construction (stitched path) ---
 ksz:
