@@ -50,6 +50,11 @@ parser.add_argument("--ells", type=float, nargs="+", default=[400, 800, 1600])
 parser.add_argument("--no-zhou", action="store_true", help="skip the Zhou+25 Fig.5 overlay")
 parser.add_argument("--raw-units", action="store_true", help="keep (dT/T)^2 mK^2, no muK^4 conversion")
 parser.add_argument("--name", default="Dcross_vs_z_stitched")
+parser.add_argument("--chi-norm", choices=["none", "z0"], default="none",
+                    help="'z0': divide D by chi(z0)^2 [Mpc^2] per chunk (plot-side only; the "
+                         "kSZ code and workers are untouched). Default 'none' = old behaviour.")
+parser.add_argument("--t21-unit", choices=["mK", "uK"], default="mK",
+                    help="unit of the stored brightness_temp field: mK (21cmFAST native, default) or uK")
 args = parser.parse_args()
 
 cfg = load_config(args.config)
@@ -59,8 +64,11 @@ os.makedirs(plot_dir, exist_ok=True)
 seeds = cfg["simulation"]["random_seeds"]
 ELLS = list(args.ells)
 
-UNIT_FAC = 1.0 if args.raw_units else (T_CMB_K * 1e6) ** 2 * 1e6
+_T21_SQ = 1e6 if args.t21_unit == "mK" else 1.0          # (T21 field)^2 -> muK^2
+UNIT_FAC = 1.0 if args.raw_units else (T_CMB_K * 1e6) ** 2 * _T21_SQ
 UNIT_LABEL = (r"$(\Delta T/T)^2\,\mathrm{mK}^2$" if args.raw_units else r"$\mu\mathrm{K}^4$")
+if args.chi_norm == "z0":
+    UNIT_LABEL += r"$/\chi^2$"
 
 # ── Load per-seed results ─────────────────────────────────────────────────────
 per_seed = {}      # seed -> {z0: result_dict}
@@ -93,11 +101,18 @@ def d_at_ell(res, ell_target):
     return float(np.interp(ell_target, ell[ok][order], D[ok][order]))
 
 seeds_used = sorted(per_seed)
+if args.chi_norm == "z0":
+    from ksz2_21cm.utils.cosmology import get_cosmology
+    _cosmo = get_cosmology(cfg)
+    CHI2 = {z0: float(_cosmo.comoving_distance(z0).value) ** 2 for z0 in z0_list}
+    print("chi-norm z0: dividing by chi(z0)^2, e.g. chi^2(z0=%.1f) = %.3e Mpc^2" % (z0_list[0], CHI2[z0_list[0]]))
+else:
+    CHI2 = {z0: 1.0 for z0 in z0_list}
 table = {L: np.full((len(seeds_used), len(z0_list)), np.nan) for L in ELLS}
 for i, s in enumerate(seeds_used):
     for j, z0 in enumerate(z0_list):
         for L in ELLS:
-            table[L][i, j] = d_at_ell(per_seed[s][z0], L) * UNIT_FAC
+            table[L][i, j] = d_at_ell(per_seed[s][z0], L) * UNIT_FAC / CHI2[z0]
 
 # ── xbar_HII at each z0 (mean over seeds) ─────────────────────────────────────
 xhii_at_z0 = np.array([
@@ -107,24 +122,38 @@ xhii_at_z0 = np.array([
 
 # ── Text summary ──────────────────────────────────────────────────────────────
 print(f"\nUnits: {'raw (dT/T)^2 mK^2' if args.raw_units else 'muK^4'}   (N seeds = {len(seeds_used)})")
+ZHOU_REF = None
+if not args.no_zhou:
+    from ksz2_21cm.plotting.zhou25_data import ZHOU_FIG5 as ZHOU_REF
 for L in ELLS:
     m = np.nanmean(table[L], axis=0)
-    print(f"\n  ell = {L:g}:")
-    for z0, x, v in zip(z0_list, xhii_at_z0, m):
-        print(f"    z0={z0:5.2f}  xHII={x:5.3f}  D = {v: .4e}")
+    nn = np.sum(np.isfinite(table[L]), axis=0)
+    se = np.nanstd(table[L], axis=0, ddof=1) / np.sqrt(np.maximum(nn, 1))
+    print(f"\n  ell = {L:g}:   (mean +/- s.e.m.,  mean/sem = significance)")
+    for z0, x, v, e in zip(z0_list, xhii_at_z0, m, se):
+        sig = v / e if e > 0 else np.nan
+        print(f"    z0={z0:5.2f}  xHII={x:5.3f}  D = {v: .4e} +/- {e:.2e}   {sig:+6.1f} sigma")
     ok = np.isfinite(m)
     if ok.sum() >= 2:
         sgn = np.sign(m[ok]); flips = np.where(np.diff(sgn) != 0)[0]
         zok = np.array(z0_list)[ok]
+        xok = xhii_at_z0[ok]
         for f in flips:
             # linear zero-crossing between adjacent chunk centres
             za, zb, ma, mb = zok[f], zok[f + 1], m[ok][f], m[ok][f + 1]
-            print(f"    sign change between z0={za} and {zb}: z_cross ~ {za + (0 - ma) * (zb - za) / (mb - ma):.2f}")
-        print(f"    max at z0={zok[np.argmax(m[ok])]}, min at z0={zok[np.argmin(m[ok])]}")
+            zc = za + (0 - ma) * (zb - za) / (mb - ma)
+            print(f"    sign change between z0={za} and {zb}: z_cross ~ {zc:.2f}  (xHII ~ {np.interp(zc, zok, xok):.2f})")
+        imax, imin = np.argmax(m[ok]), np.argmin(m[ok])
+        print(f"    max at z0={zok[imax]} (xHII={xok[imax]:.2f}),  min at z0={zok[imin]} (xHII={xok[imin]:.2f})")
+        print(f"    negative-lobe depth / positive peak = {m[ok][imin] / m[ok][imax]:+.2f}")
+        if ZHOU_REF is not None and int(L) in ZHOU_REF:
+            zz = ZHOU_REF[int(L)]
+            print(f"    [Zhou+25 digitized]  max at z={zz[np.argmax(zz[:,1]),0]:.2f},  min at z={zz[np.argmin(zz[:,1]),0]:.2f},  "
+                  f"min/max = {zz[:,1].min() / zz[:,1].max():+.2f}")
 
 # Save the numbers so replotting never needs the big caches again
 np.savez(os.path.join(plot_dir, f"{args.name}_data.npz"),
-         z0=np.array(z0_list), xhii=xhii_at_z0, ells=np.array(ELLS),
+         z0=np.array(z0_list), chi_norm=args.chi_norm, t21_unit=args.t21_unit, xhii=xhii_at_z0, ells=np.array(ELLS),
          seeds=np.array(seeds_used), unit_fac=UNIT_FAC,
          **{f"D_ell{int(L)}": table[L] for L in ELLS})
 
