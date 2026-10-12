@@ -1,0 +1,32 @@
+#!/bin/bash
+#PBS -N ma_wedge
+#PBS -q workq
+#PBS -l select=1:ncpus=16:mem=64gb
+#PBS -l walltime=06:00:00
+#PBS -o logs/ma_wedge.out
+#PBS -e logs/ma_wedge.err
+# Steps 10-11: Ma-style kSZ x 21cm / kSZ^2 x 21cm and the wedge-survival test.
+# Submit:   cd ~/ksz2-21cm && qsub pbs/run_ma_wedge.pbs
+# Smaller:  qsub -l select=1:ncpus=8:mem=32gb pbs/run_ma_wedge.pbs     (command line overrides the #PBS line)
+# Everything is cached per seed, so resubmitting after a time-out only does what is left.
+
+cd $PBS_O_WORKDIR
+mkdir -p logs
+
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+
+CFG=configs/variants/stitched_256.yaml
+echo "NCPUS=$NCPUS"
+
+echo "=== 04b: Ma-style cross-spectra ==="
+python scripts/04b_compute_cross_corr_ma_stitched.py --config $CFG
+echo "=== 08: Ma-style plots + null table ==="
+python scripts/08_plot_ma18_style.py --config $CFG
+
+echo "=== 04c: wedge / filter survival ==="
+python scripts/04c_compute_cross_corr_wedge_stitched.py --config $CFG
+echo "=== 09: wedge pedagogy plot + table ==="
+python scripts/09_plot_wedge_pedagogy.py --config $CFG
+
+echo "=== DONE ==="
