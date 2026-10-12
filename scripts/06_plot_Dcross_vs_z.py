@@ -49,7 +49,12 @@ parser.add_argument("--config", default="configs/variants/stitched_256.yaml")
 parser.add_argument("--ells", type=float, nargs="+", default=[400, 800, 1600])
 parser.add_argument("--no-zhou", action="store_true", help="skip the Zhou+25 Fig.5 overlay")
 parser.add_argument("--raw-units", action="store_true", help="keep (dT/T)^2 mK^2, no muK^4 conversion")
-parser.add_argument("--name", default="Dcross_vs_z_stitched")
+parser.add_argument("--name", default=None,
+                    help="output basename (default: Dcross_vs_z_stitched, or Dcross_vs_z_with_history with --history-panel)")
+parser.add_argument("--history-panel", action="store_true",
+                    help="add a right-hand panel overlaying our x_HII(z) with Zhou+25's fiducial history")
+parser.add_argument("--all-zhou", action="store_true",
+                    help="with --history-panel: also draw Zhou's Late and Short histories (faint)")
 parser.add_argument("--chi-norm", choices=["none", "z0"], default="none",
                     help="'z0': divide D by chi(z0)^2 [Mpc^2] per chunk (plot-side only; the "
                          "kSZ code and workers are untouched). Default 'none' = old behaviour.")
@@ -63,6 +68,8 @@ plot_dir = cfg["paths"]["plot_dir"]
 os.makedirs(plot_dir, exist_ok=True)
 seeds = cfg["simulation"]["random_seeds"]
 ELLS = list(args.ells)
+if args.name is None:
+    args.name = "Dcross_vs_z_with_history" if args.history_panel else "Dcross_vs_z_stitched"
 
 _T21_SQ = 1e6 if args.t21_unit == "mK" else 1.0          # (T21 field)^2 -> muK^2
 UNIT_FAC = 1.0 if args.raw_units else (T_CMB_K * 1e6) ** 2 * _T21_SQ
@@ -170,8 +177,17 @@ if not args.no_zhou:
     zhou = ZHOU_FIG5
 
 n = len(ELLS)
-fig, axes = plt.subplots(n, 1, figsize=(8.5, 3.4 * n), sharex=True)
-axes = np.atleast_1d(axes)
+if args.history_panel:
+    fig = plt.figure(figsize=(16.0, 3.4 * n))
+    gs = fig.add_gridspec(n, 2, width_ratios=[1.5, 1.0], wspace=0.32)
+    axes = [fig.add_subplot(gs[0, 0])]
+    axes += [fig.add_subplot(gs[i, 0], sharex=axes[0]) for i in range(1, n)]
+    for a in axes[:-1]:
+        plt.setp(a.get_xticklabels(), visible=False)
+    axes = np.array(axes)
+else:
+    fig, axes = plt.subplots(n, 1, figsize=(8.5, 3.4 * n), sharex=True)
+    axes = np.atleast_1d(axes)
 z0a = np.array(z0_list)
 
 for ax, L in zip(axes, ELLS):
@@ -206,8 +222,7 @@ for ax, L in zip(axes, ELLS):
     ax.legend(hs, ls, loc="best", frameon=False)
 
 axes[-1].set_xlabel(r"Chunk-centre redshift $z_0$")
-for ax in axes:
-    ax.invert_xaxis()
+axes[0].invert_xaxis()      # x is shared: invert ONCE (inverting every panel toggled it n times)
 xlim = axes[0].get_xlim()
 
 # top axis: xbar_HII at selected z0 values
@@ -220,7 +235,80 @@ top.set_xlabel(r"$\bar{x}_{\rm HII}$")
 top.tick_params(top=True, labeltop=True)
 
 fig.suptitle(r"$D_\ell^{\mathrm{kSZ}^2\times 21\mathrm{cm}^2}$ vs $z_0$ — stitched pipeline", y=1.0)
-fig.tight_layout()
+
+if args.history_panel:
+    from ksz2_21cm.plotting.zhou25_history import ZHOU_HISTORY, zhou_xhii_of_z
+    from matplotlib.lines import Line2D
+
+    axh = fig.add_subplot(gs[:, 1])
+    axh.set_box_aspect(1.0)
+    z_h = xhii_curves[seeds_used[0]][0]
+    xe = np.array([xhii_curves[s_][1] for s_ in seeds_used])        # all seeds share the LOS grid
+    assert all(np.allclose(xhii_curves[s_][0], z_h) for s_ in seeds_used), "z_arr differs between seeds"
+    xe_m = xe.mean(axis=0)
+    xe_s = xe.std(axis=0, ddof=1) if len(seeds_used) > 1 else np.zeros_like(xe_m)
+    axh.fill_between(z_h, xe_m - xe_s, xe_m + xe_s, color="C0", alpha=0.25, lw=0)
+    axh.plot(z_h, xe_m, color="C0", lw=2.4, label=f"this work ({len(seeds_used)} seeds, ±1σ)")
+    zf = ZHOU_HISTORY["Fiducial"]
+    axh.plot(zf[:, 0], zf[:, 1], "k--", lw=2.0, label="Zhou+25 fiducial")
+    if args.all_zhou:
+        for nm, c in (("Late", "C1"), ("Short", "C2")):
+            a = ZHOU_HISTORY[nm]
+            axh.plot(a[:, 0], a[:, 1], ":", color=c, lw=1.3, alpha=0.8, label=f"Zhou+25 {nm}")
+    axh.axhline(0.5, color="gray", lw=0.7, ls=":")
+
+    # Where D_ell's peak / zero-crossing / minimum sit on each history (for the ell below)
+    L_mark = 800 if 800 in [int(v) for v in ELLS] else int(ELLS[len(ELLS) // 2])
+
+    def _features(zs, vals):
+        o = np.argsort(zs)[::-1]                       # descending z = forward in time
+        z_, v_ = np.asarray(zs, float)[o], np.asarray(vals, float)[o]
+        ok = np.isfinite(v_)
+        z_, v_ = z_[ok], v_[ok]
+        ipk, imn = int(np.argmax(v_)), int(np.argmin(v_))
+        zc = None
+        for i in range(ipk, len(v_) - 1):              # first + -> - crossing after the peak
+            if v_[i] > 0 >= v_[i + 1]:
+                zc = z_[i] + (0 - v_[i]) * (z_[i + 1] - z_[i]) / (v_[i + 1] - v_[i])
+                break
+        return {"peak": z_[ipk], "flip": zc, "min": z_[imn]}
+
+    feats = {"this work": (_features(z0a, np.nanmean(table[L_mark], axis=0)),
+                           lambda z: float(np.interp(z, z_h, xe_m)), "C0")}
+    if zhou is not None and L_mark in zhou:
+        zz_ = zhou[L_mark]
+        feats["Zhou+25"] = (_features(zz_[:, 0], zz_[:, 1]), lambda z: float(zhou_xhii_of_z(z)), "k")
+    mk = {"peak": "^", "flip": "o", "min": "v"}
+    summary = []
+    for who, (ft, xfun, col) in feats.items():
+        for key, zv in ft.items():
+            if zv is None:
+                continue
+            axh.plot([zv], [xfun(zv)], mk[key], color=col, ms=10, mec="w", mew=1.2, zorder=5)
+        if ft["flip"] is not None:
+            summary.append(f"{who:<9s} " + r"$\bar{x}_{\rm HII}$" + f" = {xfun(ft['flip']):.2f}  (z = {ft['flip']:.1f})")
+    axh.set_xlim(12.5, 5.0)
+    axh.set_ylim(-0.02, 1.02)
+    axh.set_xlabel(r"Redshift $z$")
+    axh.set_ylabel(r"$\bar{x}_{\rm HII}(z)$")
+    h1, l1 = axh.get_legend_handles_labels()
+    leg1 = axh.legend(h1, l1, loc="upper left", frameon=False, fontsize=11)
+    axh.add_artist(leg1)
+    mh = [Line2D([], [], marker=mk[k], ls="", color="gray", ms=9, mec="w", label=t)
+          for k, t in (("peak", "peak"), ("flip", "zero-crossing"), ("min", "minimum"))]
+    axh.legend(handles=mh, title=rf"$D_\ell$ features, $\ell={L_mark}$", loc="lower right", frameon=False, fontsize=11,
+               title_fontsize=11)
+    if summary:
+        axh.text(0.03, 0.40, "zero-crossing:\n" + "\n".join(summary), transform=axh.transAxes, ha="left", va="bottom", fontsize=10)
+    axh.set_title("Reionization histories", fontsize=14)
+    print("\nHistory panel (D features at ell=%d):" % L_mark)
+    for who, (ft, xfun, _) in feats.items():
+        print("  %-10s " % who + "  ".join(f"{k}: z={v:.2f} (xHII={xfun(v):.2f})" for k, v in ft.items() if v is not None))
+
+if args.history_panel:
+    fig.subplots_adjust(left=0.06, right=0.975, top=0.90, bottom=0.09)   # gridspec + twin axes: tight_layout is unreliable here
+else:
+    fig.tight_layout()
 for ext in ("pdf", "png"):
     out = os.path.join(plot_dir, f"{args.name}.{ext}")
     fig.savefig(out, bbox_inches="tight")
