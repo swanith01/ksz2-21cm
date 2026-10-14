@@ -40,7 +40,7 @@ cfg = load_config(args.config)
 cache_dir, plot_dir = cfg["paths"]["cache_dir"], cfg["paths"]["plot_dir"]
 os.makedirs(plot_dir, exist_ok=True)
 seeds = cfg["simulation"]["random_seeds"][: args.n_seeds]
-tag = f"_dz{args.slab_dz:g}_k{args.kmin:g}-{args.kmax:g}-{args.nk}_z" + "-".join(f"{z:g}" for z in args.z0)
+tag = f"_dz{args.slab_dz:g}_k{args.kmin:g}-{args.kmax:g}-{args.nk}_z" + "-".join(f"{z:g}" for z in args.z0) + "_v2"   # v2: density convention fixed
 runs, used = [], []
 for s in seeds:
     p = os.path.join(cache_dir, f"seed_{s}", f"auto21_stitched_seed{s}{tag}.npy")

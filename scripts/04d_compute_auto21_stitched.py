@@ -42,7 +42,7 @@ cache_dir = cfg["paths"]["cache_dir"]
 seeds = cfg["simulation"]["random_seeds"][: args.n_seeds]
 cell = float(cfg["simulation"]["box_len"]) / cfg["simulation"]["hii_dim"]
 kbins = np.logspace(np.log10(args.kmin), np.log10(args.kmax), args.nk + 1)
-tag = f"_dz{args.slab_dz:g}_k{args.kmin:g}-{args.kmax:g}-{args.nk}_z" + "-".join(f"{z:g}" for z in args.z0)
+tag = f"_dz{args.slab_dz:g}_k{args.kmin:g}-{args.kmax:g}-{args.nk}_z" + "-".join(f"{z:g}" for z in args.z0) + "_v2"   # v2: density convention fixed
 
 print(f"  seeds {seeds}\n  z0 {args.z0}, slab dz = {args.slab_dz}, {args.nk} k-bins {args.kmin}..{args.kmax}\n  tag {tag}")
 wargs = []

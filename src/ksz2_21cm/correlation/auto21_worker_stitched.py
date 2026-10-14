@@ -64,7 +64,9 @@ def compute_auto21_for_seed_stitched(args):
             T = np.asarray(bt[:, :, idx], dtype=np.float64)
             X = np.asarray(xh[:, :, idx], dtype=np.float64)
             R = np.asarray(den[:, :, idx], dtype=np.float64)
-            R = R / R.mean()                       # 1 + delta (robust to either convention)
+            # stitched `density` is RAW delta (mean ~0), NOT 1+delta (see stitch_from_coeval.py).
+            # The old R/R.mean() blew up for a ~zero-mean field and corrupted T0 and Delta^2_delta.
+            R = (1.0 + R) if abs(R.mean()) < 0.5 else R / R.mean()
             n = T.shape[2]
             w = np.hanning(n + 2)[1:-1][None, None, :]
             norm_w2 = float(np.mean(w**2))

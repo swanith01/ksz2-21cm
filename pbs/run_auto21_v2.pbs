@@ -1,0 +1,22 @@
+#!/bin/bash
+#PBS -N autos21
+#PBS -q workq
+#PBS -l select=1:ncpus=4:mem=12gb
+#PBS -l walltime=03:00:00
+#PBS -o logs/autos21.out
+#PBS -e logs/autos21.err
+# 21cm auto-spectra only (v2: density convention fixed). Safe to resubmit.
+# Submit: cd ~/ksz2-21cm && qsub pbs/run_auto21_v2.pbs
+
+cd $PBS_O_WORKDIR
+mkdir -p logs
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+CFG=configs/variants/stitched_256.yaml
+echo "NCPUS=$NCPUS"
+
+echo "=== 04d: 21cm auto-spectra per seed ==="
+python scripts/04d_compute_auto21_stitched.py --config $CFG
+echo "=== 11: 21cm auto plot ==="
+python scripts/11_plot_auto21.py --config $CFG
+echo "=== DONE ==="
