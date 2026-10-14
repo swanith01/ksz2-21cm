@@ -39,8 +39,14 @@ parser.add_argument("--delta-z", type=float, default=None)
 parser.add_argument("--wedge-fraction", type=float, default=1.0)
 parser.add_argument("--ell-min-ksz", type=float, default=100.0)
 parser.add_argument("--band", type=float, nargs=2, default=[500, 1500], help="ell band for panels a, b")
-parser.add_argument("--name", default="wedge_survival")
+parser.add_argument("--name", default=None, help="output name (default wedge_survival, or wedge_survival_symlog with --symlog)")
+parser.add_argument("--symlog", action="store_true",
+                    help="symlog y axes (linear near zero, log beyond); writes a separate *_symlog file")
+parser.add_argument("--linthresh", type=float, nargs=3, default=[0.005, 2.0, 0.02],
+                    help="symlog linear threshold for panels (a) r, (b) S/N, (c) r_ell")
 args = parser.parse_args()
+if args.name is None:
+    args.name = "wedge_survival_symlog" if args.symlog else "wedge_survival"
 
 cfg = load_config(args.config)
 cache_dir, plot_dir = cfg["paths"]["cache_dir"], cfg["paths"]["plot_dir"]
@@ -203,6 +209,12 @@ axC.set_xlim(max(100, ell[j][np.isfinite(ell[j])].min()), 8000)
 axC.set_xlabel(r"$\ell$")
 axC.set_ylabel(r"$r_\ell$")
 axC.set_title(rf"at $z_0$ = {z0s[j]:.1f} ($\bar{{x}}_e \approx 0.5$)", fontsize=11)
+if args.symlog:
+    for ax_, lt in zip((axA, axB, axC), args.linthresh):
+        lo_, hi_ = ax_.get_ylim()
+        m_ = max(abs(lo_), abs(hi_))
+        ax_.set_yscale("symlog", linthresh=lt)
+        ax_.set_ylim(-m_, m_)
 fig.suptitle(rf"Does kSZ$^2\times$21cm survive foreground filtering?  ({nS} seeds; $k_\parallel>{k_par_min:g}$; "
              rf"wedge slope = {args.wedge_fraction:g} $\chi H/c(1+z)$)", fontsize=13)
 fig.tight_layout()
