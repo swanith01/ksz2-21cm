@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N autos
+#PBS -q workq
+#PBS -l select=1:ncpus=4:mem=12gb
+#PBS -l walltime=03:00:00
+#PBS -o logs/autos.out
+#PBS -e logs/autos.err
+# kSZ auto-spectrum (10) + 21cm auto-spectrum (04d + 11). Per-seed caches, safe to resubmit.
+# Submit: cd ~/ksz2-21cm && qsub pbs/run_autos.pbs
+
+cd $PBS_O_WORKDIR
+mkdir -p logs
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+CFG=configs/variants/stitched_256.yaml
+echo "NCPUS=$NCPUS"
+
+echo "=== 10: kSZ auto-spectrum ==="
+python scripts/10_plot_ksz_auto.py --config $CFG
+echo "=== 04d: 21cm auto-spectra per seed ==="
+python scripts/04d_compute_auto21_stitched.py --config $CFG
+echo "=== 11: 21cm auto plot ==="
+python scripts/11_plot_auto21.py --config $CFG
+echo "=== DONE ==="
