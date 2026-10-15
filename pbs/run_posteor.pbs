@@ -1,0 +1,27 @@
+#!/bin/bash
+#PBS -N posteor
+#PBS -q workq
+#PBS -l select=1:ncpus=4:mem=24gb
+#PBS -l walltime=06:00:00
+#PBS -o logs/posteor.out
+#PBS -e logs/posteor.err
+# Post-EoR test: extend the lightcone to z~0 (01b), kSZ map of the fully ionized gas (02b),
+# then the EoR-only vs EoR+post-EoR comparison (14). Per-seed caches, safe to resubmit.
+# Submit (seed 1):        cd ~/ksz2-21cm && qsub pbs/run_posteor.pbs
+# Other seeds:            qsub -v SEEDS="1 2 3" pbs/run_posteor.pbs
+
+cd $PBS_O_WORKDIR
+mkdir -p logs
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+CFG=configs/variants/stitched_256.yaml
+SEEDS=${SEEDS:-1}
+echo "NCPUS=$NCPUS  SEEDS=$SEEDS"
+
+echo "=== 01b: z<4 snapshots + stitching ==="
+python scripts/01b_stitch_lowz.py --config $CFG --seeds $SEEDS --threads $NCPUS
+echo "=== 02b: post-EoR kSZ map ==="
+python scripts/02b_compute_ksz_posteor.py --config $CFG --seeds $SEEDS
+echo "=== 14: comparison ==="
+python scripts/14_posteor_comparison.py --config $CFG --seeds $SEEDS
+echo "=== DONE ==="
