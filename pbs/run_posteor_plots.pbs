@@ -1,0 +1,21 @@
+#!/bin/bash
+#PBS -N posteor_dl
+#PBS -q workq
+#PBS -l select=1:ncpus=4:mem=16gb
+#PBS -l walltime=06:00:00
+#PBS -o logs/posteor_dl.out
+#PBS -e logs/posteor_dl.err
+# D_ell plots, EoR only vs EoR + post-EoR kSZ (script 16), all seeds that have a post-EoR map.
+# Run it AFTER run_posteor.pbs has finished, e.g. queue it behind that job:
+#   cd ~/ksz2-21cm && qsub -W depend=afterok:<posteor job id> pbs/run_posteor_plots.pbs
+# Output (in the config's plot_dir): posteor_Dl_vs_z, posteor_Dl_diff, posteor_Dl_vs_xe (.pdf/.png),
+#   posteor_Dl_table.txt, posteor_Dl_data.npz.   Safe to resubmit (per-seed caches).
+
+cd $PBS_O_WORKDIR
+mkdir -p logs
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+CFG=configs/variants/stitched_256.yaml
+echo "NCPUS=$NCPUS"
+python scripts/16_posteor_Dl_plots.py --config $CFG --verify-eor --workers $NCPUS
+echo "=== DONE ==="
