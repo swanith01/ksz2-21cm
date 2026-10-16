@@ -89,6 +89,8 @@ if __name__ == "__main__":
     p.add_argument("--seeds", type=int, nargs="+", default=[1])
     p.add_argument("--block", type=int, default=300)
     p.add_argument("--chi-ksz", type=float, default=8504.0)
+    p.add_argument("--delete-lowz", action="store_true",
+                   help="delete stitched_lowz_seed<N>.npz (~1.1 GB) once the post-EoR map is saved (map is ~0.5 MB)")
     args = p.parse_args()
     cfg = load_config(args.config); ensure_dirs(cfg)
     cache_dir = cfg["paths"]["cache_dir"]; L = cfg["coeval_ksz"]["box_len"]
@@ -109,6 +111,8 @@ if __name__ == "__main__":
         m, info = posteor_map(main, low, ne0, args.block)
         np.save(out, m)
         print(f"seed {seed}: post-EoR map saved ({out})")
+        if args.delete_lowz:
+            os.remove(lp); print(f"   deleted {lp}")
         print(f"   patchy window ends at z = {info['z_patchy_end']:.2f}; post-EoR slices: "
               f"{info['n_low']} new (z<{main['z_arr'].min():.1f}) + {info['n_keep'] - 1} existing")
         print(f"   visibility at the join (low-z analytic vs existing): {info['vis_join'][0]:.5f} vs {info['vis_join'][1]:.5f}")

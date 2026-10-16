@@ -8,7 +8,9 @@
 # Post-EoR test: extend the lightcone to z~0 (01b), kSZ map of the fully ionized gas (02b),
 # then the EoR-only vs EoR+post-EoR comparison (14). Per-seed caches, safe to resubmit.
 # Submit (seed 1):        cd ~/ksz2-21cm && qsub pbs/run_posteor.pbs
-# Other seeds:            qsub -v SEEDS="1 2 3" pbs/run_posteor.pbs
+# Other seeds:            qsub -v SEEDS="2 3 4 5" pbs/run_posteor.pbs     (~20 min per seed)
+# Save disk (delete the 1.1 GB z<4 file per seed after its map is built):
+#                         qsub -v SEEDS="2 3 4 5",CLEAN=1 pbs/run_posteor.pbs
 
 cd $PBS_O_WORKDIR
 mkdir -p logs
@@ -21,7 +23,10 @@ echo "NCPUS=$NCPUS  SEEDS=$SEEDS"
 echo "=== 01b: z<4 snapshots + stitching ==="
 python scripts/01b_stitch_lowz.py --config $CFG --seeds $SEEDS --threads $NCPUS
 echo "=== 02b: post-EoR kSZ map ==="
-python scripts/02b_compute_ksz_posteor.py --config $CFG --seeds $SEEDS
+python scripts/02b_compute_ksz_posteor.py --config $CFG --seeds $SEEDS ${CLEAN:+--delete-lowz}
 echo "=== 14: comparison ==="
-python scripts/14_posteor_comparison.py --config $CFG --seeds $SEEDS
+# 14 uses every seed that already has a post-EoR map (earlier seeds included)
+ALL=$(ls ~/ksz2-21cm-data/stitched_256/cache/kSZ_maps/kSZ_map_postEoR_seed*.npy | sed -E 's/.*seed([0-9]+)\.npy/\1/' | sort -n | tr '\n' ' ')
+echo "comparison over seeds: $ALL"
+python scripts/14_posteor_comparison.py --config $CFG --seeds $ALL
 echo "=== DONE ==="
