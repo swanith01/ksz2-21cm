@@ -89,7 +89,16 @@ the same npz contract as our 21cmFAST lightcones. If not, the plan needs rethink
   layout read by the vendored `ksz_pipeline/amber/io.py` (z, rho2, mom2).
 - The log calls the 21cm model "21cm simple" and uses the same density and velocity meshes as the snapshots.
 
-Not yet checked: that the Tb box is on the same grid as the density box (cell by cell), and the axis order of the
-Tb file. Run `scripts/amber/check_amber_21cm.py --run $R/amber_runs/tiny21` to test both.
+Alignment check (`scripts/amber/check_amber_21cm.py`, first run, step 24 version):
+- Mean of each Tb box equals AMBER's own global T_b to 0.1-0.2% at every z (e.g. z=11.5: 31.73 vs 31.65 mK).
+- Tb file axis order is Fortran ('F', like the field files). Correlation with rho2 in F order:
+  z=7.5 -0.45, 8.5 -0.40, 9.5 -0.11, 10.5 +0.25, 11.5 +0.55; in C order |r| < 0.07 at all z. Sign change is physical
+  (dense regions ionize first, so Tb is anti-correlated with rho once the box is partly ionized). The step-24 script
+  picked the order by the larger r instead of the larger |r|, which mislabelled z <= 9.5 as 'C'; fixed in step 25.
+- Tb / rho2 is NOT constant across neutral cells (scatter 6% at z=11.5, 40% at z=8.5-9.5), so the ionization field is
+  either fractional per cell or Tb uses a slightly different density. Not yet resolved.
+- AMBER's global T_b / (x_H * T0) is a constant ~1.08 at all z (1.082 to 1.085) against the textbook T0 (T_S >> T_CMB, Yp 0.245,
+  Ob=0.04897, h=0.6766, Om=0.3111): an overall normalisation difference of ~8% in T21 (~17% in T21^2). Source of the
+  prefactor still to be read from `amber/src/h21cm*.f90`.
 
 Cost: the tiny box took 1 s, so it says nothing about L=256, N=128 (64x more cells). Time that next.
