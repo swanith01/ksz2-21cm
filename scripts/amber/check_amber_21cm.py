@@ -12,7 +12,8 @@ and tests whether the two boxes sit on the same grid:
     ionized); the wrong one gives r ~ 0.
   * AMBER's own global T_b and x_H (21cm_global.txt) against the textbook T0 (exact formula, T_S >> T_CMB):
     "norm" = T_b / (x_H * T0). A constant norm != 1 means an overall prefactor difference inside AMBER.
-  * Spread of Tb/rho over cells with Tb>0 (median, 99th percentile, max), and the mean of rho.
+  * Spread of Tb/rho2 over cells with Tb>0 (median, 99th percentile, max), and the mean of rho2.
+  * P(k) of the .dat box against AMBER's own P_TT (power_z file, built from rho2): where do rho1 and rho2 differ?
 
 Only reads files and prints; needs numpy. Light enough for a login node (N=32 boxes are 0.5 MB).
 
@@ -22,6 +23,7 @@ import argparse, glob, os, re
 import numpy as np
 
 DT = np.dtype('<f4')
+KK_SHOW = (1, 2, 3, 4, 6, 8, 12, 16)
 
 
 def read_tb(path, N, order):
@@ -36,6 +38,23 @@ def read_rho(path, N):
     if a.size != 1 + 4 * N ** 3:
         raise ValueError(f"{path}: {a.size} floats, expected {1 + 4 * N**3}")
     return float(a[0]), a[1:1 + N ** 3].reshape((N, N, N), order='F')
+
+
+def binned_power(box, L):
+    """Shell-averaged P(k) of a periodic box, binned like AMBER (kk = nint(|k|/Ak), zero mode dropped).
+    P = <|FFT(box)/N^3|^2> * L^3.  Returns an array indexed by kk (index 0 unused)."""
+    N = box.shape[0]
+    f = np.fft.fftn(box.astype(np.float64)) / N ** 3
+    p = np.abs(f) ** 2 * L ** 3
+    n1 = np.fft.fftfreq(N, d=1.0 / N)
+    kx, ky, kz = np.meshgrid(n1, n1, n1, indexing='ij')
+    kk = np.rint(np.sqrt(kx ** 2 + ky ** 2 + kz ** 2)).astype(int).ravel()
+    sums = np.bincount(kk, weights=p.ravel())
+    cnt = np.bincount(kk).astype(float)
+    cnt[cnt == 0] = 1.0
+    P = sums / cnt
+    P[0] = 0.0
+    return P
 
 
 def t0_exact(z, Ob, h, Om, Yp=0.245):
@@ -69,6 +88,7 @@ def main():
     print(f"{'z':>6} {'r(F)':>7} {'r(C)':>7} {'order':>5} {'<Tb>':>7} {'<Tb>glob':>8} {'xH glob':>7} "
           f"{'T0 exact':>8} {'norm':>6} {'<rho>':>6} {'Tb/rho: p50':>11} {'p99':>6} {'max':>6} {'xN vol':>6}")
     votes = []
+    pk_rows = []
     for f in tbs:
         m = re.search(r'Tb_L=([0-9.]+)_N=(\d+)_z=([0-9.]+)\.dat$', os.path.basename(f))
         L, N, zs = float(m.group(1)), int(m.group(2)), m.group(3)
@@ -99,6 +119,31 @@ def main():
         print(f"{z:6.2f} {rF:7.3f} {rC:7.3f} {best:>5} {tb.mean():7.3f} {gt:8.3f} {gx:7.3f} "
               f"{t0:8.2f} {gt / (gx * t0):6.3f} {rho.mean():6.3f} {np.median(ratio):11.2f} "
               f"{np.percentile(ratio, 99):6.2f} {ratio.max():6.2f} {neu.mean():6.3f}")
+        pf = os.path.join(out, '21cm', f'power_z={zs}.txt')
+        if os.path.exists(pf):
+            try:
+                T = np.loadtxt(pf, skiprows=1)
+                Pdat = binned_power(tb, L)
+                rows = []
+                for kk in KK_SHOW:
+                    if kk - 1 < len(T) and kk < len(Pdat) and T[kk - 1, 3] > 0:
+                        rows.append((kk, 2 * np.pi / L * kk, Pdat[kk] / T[kk - 1, 3], T[kk - 1, 0] / (2 * np.pi / L * kk)))
+                pk_rows.append((z, rows))
+            except Exception as e:
+                print(f"       (could not compare P(k) at z={z:.2f}: {e})")
+
+    if pk_rows:
+        print()
+        print("Power spectrum of the Tb .dat box divided by AMBER's own P_TT (power_z file, built from rho2), per k-shell kk:")
+        ks = pk_rows[0][1]
+        print(f"{'z':>6} " + " ".join(f"kk={r[0]}".rjust(8) for r in ks))
+        print(f"{'k h/Mpc':>6} " + " ".join(f"{r[1]:8.3f}" for r in ks))
+        for z, rows in pk_rows:
+            print(f"{z:6.2f} " + " ".join(f"{r[2]:8.3f}" for r in rows))
+        chk = [r[3] for r in pk_rows[0][1]]
+        print("(file k / (2pi/L * kk), should be 1.00: " + " ".join(f"{c:.2f}" for c in chk) + ")")
+        print("  ~1 at small kk and drifting away at large kk = the .dat box (rho1) and AMBER's P_TT (rho2) agree on large")
+        print("  scales and differ only near the grid scale. Exactly 1 everywhere = the .dat box is the rho2 one.")
 
     print()
     if votes:
@@ -108,8 +153,8 @@ def main():
         print("  |r(right order)| well above |r(wrong order)| = Tb and rho share one grid. r may be negative at lower z.")
         print("  norm = AMBER's own global T_b / (x_H * T0 exact). 1.000 = AMBER's T0 agrees with the textbook value; a")
         print("  constant norm at all z = one overall prefactor difference.")
-        print("  Tb/rho p50, p99, max: if cells are fully neutral or fully ionized these three agree (= T0 * norm);")
-        print("  a long spread below the max means cells are partly ionized (or Tb uses a different density).")
+        print("  Tb/rho2 p50, p99, max: AMBER's ionization is binary (neutral if z > zre), so for a rho2-based box these")
+        print("  three would agree (= T0 * norm). A spread means the .dat box uses another density (rho1; source line 156).")
         print("  <rho> should be 1.000.")
 
 

@@ -101,4 +101,18 @@ Alignment check (`scripts/amber/check_amber_21cm.py`, first run, step 24 version
   Ob=0.04897, h=0.6766, Om=0.3111): an overall normalisation difference of ~8% in T21 (~17% in T21^2). Source of the
   prefactor still to be read from `amber/src/h21cm*.f90`.
 
+What the AMBER source says (`src/h21cm.f90`, `src/h21cmreion.f90`, read 20 Oct 2026):
+- The 21cm module loops over bins [zmin, zmax] in steps of zdel and works at each bin MIDPOINT (z = zmin + zdel/2, ...),
+  Nz = ceiling((zmax-zmin)/zdel). For production set `--h21zmin/--h21zmax/--h21zdel` equal to `--czmin/--czmax/--czdel`
+  so every CMB shell has a Tb box at the same z. (The pilot used czmin 5 but h21zmin 6, hence no z=5.5 box.)
+- Physics: "Assume Ts >> Tcmb. Ignore peculiar vel, lightcone effects." So no spin-temperature evolution, NO redshift-space
+  distortions. Check that this matches the 21cmFAST switches used for the comparison runs.
+- T0 = 28 mK (Ob h^2/0.022) sqrt(0.15/(Om h^2)) sqrt((1+z)/10)  (Madau et al. 1997 fit). This is ~8% above the exact
+  value (norm = 1.081 at every z in the pilot). A fixed scalar; irrelevant for correlation coefficients, +17% on T21^2.
+- Ionization is BINARY per cell: neutral if z > zre(i,j,k) (from the reion zre field), else Tb = 0.
+- Two maps are made: Tb1 = T0 * rho1 (real space) and Tb2 = T0 * rho2 (used for AMBER's own P_TT in power_z files).
+  The kSZ field dump uses rho2 (interlaced + deconvolved). The Tb/rho2 spread seen in the pilot (p99 +20%, max up to 3x)
+  fits the .dat box being the rho1 one (min rho1 = 0 in the log). Whether this matters at l <= 1600 (k < ~0.2 /Mpc,
+  roughly a fifth of the grid Nyquist) is tested by the P(k) comparison in `check_amber_21cm.py` (step 26).
+
 Cost: the tiny box took 1 s, so it says nothing about L=256, N=128 (64x more cells). Time that next.
