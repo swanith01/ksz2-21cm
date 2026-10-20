@@ -73,3 +73,23 @@ Wall time times 16 cores is the cost of one run. Multiply by 30 for 3 histories 
 Whether AMBER's own 21cm output exists, in what format, on which redshifts, and on which grid. If it is usable and
 lines up with the density and velocity snapshots, the next step (not built yet) is a reader plus a stitcher that writes
 the same npz contract as our 21cmFAST lightcones. If not, the plan needs rethinking.
+
+## Pilot result (20 Oct 2026, CSD3, job on node cpu-q-141, run `tiny21`: L=64, N=32, ncore 16)
+
+- AMBER built (ifort 2021.6.0 + MKL 2022.1.0) and ran to "AMBER completed", exit code 0, wall time 1 s.
+- Everything lives in `~/rds/rds-dirac-dp145-uYnnMXSp128/dc-upad3/` (own folder, not the shared project top level).
+- With `--h21cm write --h21zmin 6 --h21zmax 12 --h21zdel 1`, `output/21cm/` holds:
+  - `Tb_L=64_N=32_z=06.50 ... 11.50.dat`: six files, each exactly 4*N^3 = 131072 bytes, so raw float32, no header.
+    Redshifts are the shell midpoints inside [zmin, zmax]; z=5.5 is missing because 5.5 < zmin. For a real run use
+    `--h21zmin 5` so all seven midpoints (5.5 ... 11.5) are written.
+  - `power_z=XX.XX.txt` (1445 bytes each) and `21cm_global.txt` (columns z, x_H, T_b; 0.01 steps in z).
+- Mean Tb [mK] by z: 6.5: 0 (fully ionized), 7.5: 8.1, 8.5: 18.6, 9.5: 25.1, 10.5: 29.1, 11.5: 31.7. Min 0, max 38 to 64.
+  Monotonic and of the expected size (about 30 mK for a fully neutral box at z=11.5).
+- `output/cmb/fields_z=XX.XX.dat` exist for all seven midpoints (5.5 ... 11.5), 524292 bytes = 4 + 16*N^3, matching the
+  layout read by the vendored `ksz_pipeline/amber/io.py` (z, rho2, mom2).
+- The log calls the 21cm model "21cm simple" and uses the same density and velocity meshes as the snapshots.
+
+Not yet checked: that the Tb box is on the same grid as the density box (cell by cell), and the axis order of the
+Tb file. Run `scripts/amber/check_amber_21cm.py --run $R/amber_runs/tiny21` to test both.
+
+Cost: the tiny box took 1 s, so it says nothing about L=256, N=128 (64x more cells). Time that next.
