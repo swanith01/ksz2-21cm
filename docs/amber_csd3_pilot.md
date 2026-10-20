@@ -116,3 +116,37 @@ What the AMBER source says (`src/h21cm.f90`, `src/h21cmreion.f90`, read 20 Oct 2
   roughly a fifth of the grid Nyquist) is tested by the P(k) comparison in `check_amber_21cm.py` (step 26).
 
 Cost: the tiny box took 1 s, so it says nothing about L=256, N=128 (64x more cells). Time that next.
+
+## Real-size timing result (20 Oct 2026, run `q256`: L=256 Mpc/h, N=128, 28 shells z=4.75...18.25, ncore 16)
+
+- AMBER wall time 11 s (exit 0), about 0.05 core-hours. 28 Tb boxes + 28 power files + global history in `output/21cm` (225 MB),
+  28 field dumps in `output/cmb` (898 MB), zre 8 MB: about 1.1 GB per run. Compute is not the limit; disk and queue are.
+- Plan: AMBER at L=512 Mpc/h, N=256 (757 Mpc box, 2.96 Mpc cells) is almost our 800 Mpc / 256^3 21cmFAST box. About 9.5 GB per
+  run raw (28 x 268 MB fields + 28 x 67 MB Tb), so stitch, then delete the raw fields (`--delete-raw`).
+
+## Stage 3: reader + stitcher (step 27)
+
+New files (everything else, including scripts 02 and 04 and the kSZ code, is untouched):
+- `src/ksz2_21cm/simulate/amber_io.py`: readers (fields and zre vendored from ksz-pipeline, Tb reader new), snapshot matching.
+- `src/ksz2_21cm/simulate/stitch_from_amber.py`: same `stitch_field` (verbatim) and the same wrap-cycle seed for all four fields.
+- `scripts/01a_stitch_lightcones_amber.py`: one AMBER run directory per seed -> `cache_dir/seed_N/stitched_lightcone_seedN.npz`
+  with the same keys as `01_stitch_lightcones.py` (density, xH_box, velocity_z, brightness_temp, z_arr, pos_axis) plus metadata.
+- `configs/variants/amber_q512.yaml`: box_len = 512/0.6766 Mpc, hii_dim 256. 01a asserts these match the AMBER files.
+- `tests/test_amber_stitch.py`: synthetic AMBER output in the real byte layout; checks axis order, contract, xH direction,
+  shared rotation (breaks if Tb is stitched with another seed), tb_scale, and the script end to end.
+  Also run once by hand: 01a, then the unchanged `02_compute_ksz_maps_stitched.py` and `04_compute_cross_corr_sq_stitched.py`
+  accept the file.
+
+Native conventions are kept: Tb is AMBER's (Madau T0, 1.081 x exact, no RSD, Ts >> Tcmb, from rho1). `--tb-scale 0.925` applies
+1/1.081 explicitly, and `tb_native_over_exact` is stored in every npz.
+
+Run on CSD3 (compute node: about 10 GB RAM and 10 to 15 min per seed at N=256):
+
+    source $R/amber_env/bin/activate; pip install pyyaml matplotlib
+    python scripts/01a_stitch_lightcones_amber.py --config configs/variants/amber_q512.yaml \
+        --run-dir-template $R/amber_runs/q512 --seeds 1
+    python scripts/02_compute_ksz_maps_stitched.py --config configs/variants/amber_q512.yaml
+    python scripts/04_compute_cross_corr_sq_stitched.py --config configs/variants/amber_q512.yaml
+
+(The template has no {seed} here because the test run is not in a seed_N folder; production runs use `.../seed_{seed}`.)
+Scripts 02 and 04 loop over `simulation.random_seeds` in the config and skip seeds without a file, so a one-seed test is fine.

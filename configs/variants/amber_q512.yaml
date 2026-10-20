@@ -1,0 +1,86 @@
+# =============================================================================
+# amber_q512.yaml -- the stitched kSZ x 21cm pipeline on AMBER snapshots (scripts/01a_stitch_lightcones_amber.py).
+#
+# AMBER run: L = 512 Mpc/h, N = 256  ->  box 756.72 Mpc, cell 2.956 Mpc (cf. the 21cmFAST runs: 800 Mpc, 256^3,
+# cell 3.125 Mpc). Everything else downstream (02, 04, 04b, ...) is unchanged and reads box_len / hii_dim from here,
+# so they MUST equal AMBER's L/h and N (01a asserts this).  box_len = 512 / 0.6766.
+#
+# Not yet validated at this size: the AMBER pilot validation was at 256 Mpc/h, N=128 (ksz-pipeline) and the CSD3
+# runs so far are 64/32 and 256/128. Seeds: START SMALL.
+# =============================================================================
+
+run_name: amber_q512
+
+paths:
+  # Deliberately outside the repo, same reasoning as fiducial.yaml -- this
+  # produces real (if smaller-resolution) science cache, not a throwaway
+  # smoke test. A SEPARATE directory from fiducial/ so nothing here can
+  # collide with or overwrite the existing native-lightcone cache.
+  cache_dir: ~/rds/rds-dirac-dp145-uYnnMXSp128/dc-upad3/ksz2-21cm-data/amber_q512/cache
+  plot_dir:  ~/rds/rds-dirac-dp145-uYnnMXSp128/dc-upad3/ksz2-21cm-data/amber_q512/plots
+
+simulation:
+  hii_dim: 256             # = AMBER N; matches coeval_ksz.hii_dim
+                            # below; this is also the transverse pixel grid
+                            # for the resulting 2D kSZ/21cm maps.
+  box_len: 756.724800472953   # = AMBER L / h = 512 / 0.6766 Mpc
+  z_min: 0.001               # kept for consistency with the config schema's
+                            # required keys / any script that still reads it
+                            # (e.g. a future SNR forecast); NOT used by the
+                            # stitched path itself -- see coeval_ksz.z_snapshots
+                            # and analytic_tau_below() for how tau(z<4) is
+                            # actually handled (see ksz module docstrings).
+  z_max: 20.0
+  n_threads: 32
+  random_seeds: [1, 2, 3]   # START SMALL -- 3 seeds, per the 2026-10-06 plan
+                            # ("a handful (3-5) to sanity check before
+                            # committing to a bigger ensemble"). Widen once
+                            # the registration/shape check against the old
+                            # native-lightcone result looks right.
+
+# --- kSZ map construction (stitched path) ---
+ksz:
+  # No single z_obs here -- the stitched path integrates the full
+  # z_snapshots window and uses optical_depth.compute_patchy_mask() (an
+  # x_e-threshold cut, 99.99% neutral to 0.01% neutral) to clip the SIGNAL
+  # integral to the patchy regime, rather than a hardcoded cutoff redshift.
+  # Kept here only because load_config() requires the key to exist;
+  # 02_compute_ksz_maps_stitched.py does not read it.
+  z_obs: 4.718
+
+coeval_ksz:
+  # Vendored verbatim from ksz-pipeline configs/fiducial.yaml.
+  z_snapshots: [4.75, 5.25, 5.75, 6.25, 6.75, 7.25, 7.75, 8.25, 8.75, 9.25, 9.75, 10.25, 10.75,
+                11.25, 11.75, 12.25, 12.75, 13.25, 13.75, 14.25, 14.75, 15.25, 15.75, 16.25, 16.75,
+                17.25, 17.75, 18.25]   # AMBER CMB-shell midpoints for czmin 4.5, czmax 18.5, czdel 0.5
+  hii_dim: 256               # coeval box resolution; must equal simulation.hii_dim
+                            # above since stitch_lightcone_from_coeval assembles
+                            # the 2D map at this same transverse grid.
+  box_len: 756.724800472953   # = AMBER L / h
+
+# --- kSZ^2 x 21cm^2 cross-correlation (Zhou+25 style) -- unchanged logic ---
+cross_correlation:
+  k_par_min: 0.01
+  delta_z: 2.0
+  z_chunk_centres: [6, 7, 8, 9, 10, 11]
+
+# --- cosmology ---
+# NOTE: this cfg value feeds get_cosmology(cfg) -> FlatLambdaCDM(H0=67.66,
+# Om0=0.30964144154550644), used by the cross-corr worker's ell=k*chi(z0)
+# step. The VENDORED stitching/velocity/tau modules (simulate/stitch_
+# from_coeval.py etc.) separately hardcode astropy's literal Planck18
+# preset (H0=67.66, Om0=0.30966...) at import time -- NOT this cfg value.
+# The two differ in Om0 at the ~2e-5 level, negligible next to every other
+# systematic already flagged in this pipeline, but real and worth stating
+# plainly rather than leaving implicit -- don't "fix" this by threading cfg
+# through the vendored files without deciding that's worth diverging
+# further from upstream ksz-pipeline for.
+cosmology:
+  use: custom
+  H0: 67.66
+  Om0: 0.30964144154550644
+
+snr:
+  f_sky: 0.024
+  cmb_experiments: [SO]
+  radio_experiments: [HERA]
