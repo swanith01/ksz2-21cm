@@ -37,6 +37,9 @@ ap.add_argument("--out-dir", default=None, help="default: <data-root>/amber_hist
 ap.add_argument("--ells", type=float, nargs="+", default=[400, 800, 1600])
 ap.add_argument("--no-zhou", action="store_true")
 ap.add_argument("--raw-units", action="store_true", help="keep (dT/T)^2 mK^2, no muK^4 conversion")
+ap.add_argument("--chi-norm", choices=["none", "z0"], default="z0",
+                help="'z0' (default): divide D by chi(z0)^2 [Mpc^2] per chunk, exactly as 06 --chi-norm z0 and 08 do "
+                     "(plot-side only; the kSZ code is untouched). 'none' = raw, the numbers printed before this option existed.")
 ap.add_argument("--name", default="amber_history")
 a = ap.parse_args()
 
@@ -45,6 +48,8 @@ os.makedirs(out_dir, exist_ok=True)
 ELLS = list(a.ells)
 UNIT_FAC = 1.0 if a.raw_units else (T_CMB_K * 1e6) ** 2 * 1e6
 UNIT_LABEL = r"$(\Delta T/T)^2\,\mathrm{mK}^2$" if a.raw_units else r"$\mu\mathrm{K}^4$"
+if a.chi_norm == "z0":
+    UNIT_LABEL += r"$/\chi^2$"
 
 hist_dirs = sorted(glob.glob(os.path.join(a.data_root, "amber_q512_h*")),
                    key=lambda p: float(re.findall(r"_h([0-9.]+)$", p)[0]))
@@ -88,15 +93,23 @@ z0_list = sorted(set.intersection(*[set(r.keys()) for h in H for r in h["res"].v
 z0a = np.array(z0_list)
 print(f"chunk centres z0 in common: {z0_list}")
 
+if a.chi_norm == "z0":
+    from ksz2_21cm.utils.cosmology import get_cosmology
+    _cosmo = get_cosmology()
+    CHI2 = np.array([float(_cosmo.comoving_distance(z0).value) ** 2 for z0 in z0_list])
+    print("chi-norm z0: dividing by chi(z0)^2 [Mpc^2]: " + ", ".join(f"z0={z:g}: {c:.3e}" for z, c in zip(z0_list, CHI2)))
+else:
+    CHI2 = np.ones(len(z0_list))
+
 for h in H:
-    h["table"] = {L: np.array([[d_at_ell(h["res"][s][z0], L) * UNIT_FAC for z0 in z0_list] for s in h["seeds"]])
+    h["table"] = {L: np.array([[d_at_ell(h["res"][s][z0], L) * UNIT_FAC / CHI2[j] for j, z0 in enumerate(z0_list)] for s in h["seeds"]])
                   for L in ELLS}
     h["mean"] = {L: np.nanmean(h["table"][L], axis=0) for L in ELLS}
     h["sem"] = {L: (np.nanstd(h["table"][L], axis=0, ddof=1) / np.sqrt(np.maximum(np.sum(np.isfinite(h["table"][L]), axis=0), 1))
                     if len(h["seeds"]) > 1 else np.zeros(len(z0_list))) for L in ELLS}
 
 # ---- text summary ----
-print(f"\nUnits: {'raw' if a.raw_units else 'muK^4'}")
+print(f"\nUnits: {'raw' if a.raw_units else 'muK^4'}{' / Mpc^2 (chi-norm z0)' if a.chi_norm == 'z0' else ''}")
 for L in ELLS:
     print(f"\n  ell = {L:g}")
     print(f"    {'z_mid':>5} {'N':>2} {'z50':>5}  {'peak z0':>7} {'peak D':>9} {'peak-z50':>8}   {'trough z0':>9} {'trough D':>9}   zero-crossings")
@@ -113,6 +126,7 @@ for L in ELLS:
               f"{zk[it]:9.2f} {mk[it]:9.3g}   {', '.join(f'{c:.2f}' for c in zc) or '-'}")
 
 np.savez(os.path.join(out_dir, f"{a.name}_data.npz"), z0=z0a, ells=np.array(ELLS), unit_fac=UNIT_FAC,
+         chi_norm=a.chi_norm, chi2=CHI2,
          zmid=np.array([h["zm"] for h in H]), z50=np.array([h["z50"] for h in H]),
          **{f"mean_h{h['zm']:g}_ell{int(L)}": h["mean"][L] for h in H for L in ELLS},
          **{f"sem_h{h['zm']:g}_ell{int(L)}": h["sem"][L] for h in H for L in ELLS},
