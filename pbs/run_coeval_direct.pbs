@@ -1,0 +1,33 @@
+#!/bin/bash
+#PBS -N coeval_direct
+#PBS -q workq
+#PBS -l select=1:ncpus=16:mem=48gb
+#PBS -l walltime=12:00:00
+#PBS -o logs/coeval_direct.out
+#PBS -e logs/coeval_direct.err
+
+# kSZ x 21cm straight from the coeval boxes of ONE seed (scripts/18), then the comparison
+# plots for every seed finished so far (scripts/19, light).
+# 21cmFAST regenerates the seed's boxes up to z = 13 (same seed and parameters as the
+# stitched lightcone, so the same realisation). Its .h5 cache (~20 GB at 256^3) lives in
+# ~/ksz2-21cm-data/stitched_256/coeval_direct_h5/seed_<N>/ and is deleted at the end.
+#
+# One job per seed:
+#   qsub -v SEED=1 pbs/run_coeval_direct.pbs
+#   qsub -v SEED=2 pbs/run_coeval_direct.pbs
+#   qsub -v SEED=3 pbs/run_coeval_direct.pbs
+# (Running them at the same time needs ~60 GB of free disk; one after another needs ~20 GB.)
+
+cd $PBS_O_WORKDIR
+mkdir -p logs
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+export OMP_NUM_THREADS=16
+CFG=configs/variants/stitched_256.yaml
+SEED=${SEED:?submit with qsub -v SEED=<n>}
+LOG=logs/coeval_direct_seed${SEED}_$(date +%Y%m%d_%H%M).log
+echo "seed $SEED on $(hostname), log $LOG"
+
+python scripts/18_coeval_direct.py --config $CFG --seed $SEED 2>&1 | tee $LOG
+python scripts/19_plot_coeval_direct.py --config $CFG 2>&1 | tee -a $LOG
+echo "=== DONE seed $SEED ===" | tee -a $LOG
