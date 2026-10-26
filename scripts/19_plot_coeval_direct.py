@@ -6,7 +6,7 @@
 # the SAME seeds, one figure per statistic, D_ell vs chunk centre z0 at fixed ell:
 #   coeval_vs_lc_zhou.{png,pdf}    kSZ^2 x 21cm^2     lightcone | Limber (bispectrum)
 #   coeval_vs_lc_ma_sq.{png,pdf}   kSZ^2 x 21cm       lightcone | Limber (bispectrum)
-#   coeval_vs_lc_ma_lin.{png,pdf}  kSZ x 21cm         lightcone | Ma eq 8 (measured P_dT) | Ma eq 8 (linearised T21)
+#   coeval_vs_lc_ma_lin.{png,pdf}  kSZ x 21cm         lightcone | Ma eq 8 (measured P_dT) | (linearised T21) | (box-measured velocity)
 # Bands / bars = s.e.m. over seeds. Units as 06 / 08 with --chi-norm z0 (divided by chi(z0)^2).
 # Also: coeval_vs_lc_data.npz (every curve) and coeval_vs_lc_summary.csv (per estimator and ell:
 # least-squares amplitude coeval/lightcone over z0, and the correlation of the two z0 curves).
@@ -54,7 +54,8 @@ STATS = {
                   title=r"kSZ$^2\times$21cm (Ma)", est=[("sq_limber", "coeval Limber (bispectrum)")]),
     "ma_lin": dict(ells=[100, 500], unit=U_LIN, ylab=r"$D_\ell/\chi^2$ [mK $\mu$K/Mpc$^2$]",
                    title=r"kSZ$\times$21cm (Ma)", est=[("lin_maeq8", r"Ma eq 8, measured $P_{\delta T}$"),
-                                                       ("lin_maeq8_lin", r"Ma eq 8, linearised $T_{21}$")]),
+                                                       ("lin_maeq8_lin", r"Ma eq 8, linearised $T_{21}$"),
+                                                       ("lin_maeq8_vcal", r"Ma eq 8, velocity from box")]),
 }
 
 
@@ -158,7 +159,8 @@ plt.rcParams.update({"font.size": 12, "axes.labelsize": 13, "legend.fontsize": 1
                      "xtick.labelsize": 11, "ytick.labelsize": 11})
 z0a = np.array(z0s)
 xe_a = np.array([np.mean(xe_z0[z]) for z in z0s])
-STYLE = {"lightcone": dict(color="#0072B2"), 1: dict(color="#D55E00", marker="o"), 2: dict(color="#009E73", marker="s")}
+STYLE = {"lightcone": dict(color="#0072B2"), 1: dict(color="#D55E00", marker="o"), 2: dict(color="#009E73", marker="s"),
+         3: dict(color="#CC79A7", marker="^")}
 
 for stat, spec in STATS.items():
     ells = spec["ells"]
@@ -170,7 +172,7 @@ for stat, spec in STATS.items():
         ax.plot(z0a, m[:, k], "-", lw=2, label="stitched lightcone", **STYLE["lightcone"])
         for n, (src, lab) in enumerate(spec["est"], start=1):
             m2, e2 = mean_sem(curves[(stat, src)])
-            ax.errorbar(z0a + 0.04 * (n - 1.5), m2[:, k], yerr=e2[:, k], ls="--", lw=1.2, ms=4, capsize=2, label=lab, **STYLE[n])
+            ax.errorbar(z0a + 0.04 * (n - 2), m2[:, k], yerr=e2[:, k], ls="--", lw=1.2, ms=4, capsize=2, label=lab, **STYLE[n])
         ax.axhline(0, color="gray", lw=0.8)
         ax.set_ylabel(spec["ylab"], fontsize=11)
         ax.text(0.02, 0.92, rf"$\ell={L}$", transform=ax.transAxes, va="top")

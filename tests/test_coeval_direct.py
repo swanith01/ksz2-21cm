@@ -119,3 +119,16 @@ def test_maeq8_linear_theory():
     # 24 realisations leave ~10% noise on the band amplitude; a sign error or a missing
     # factor of 2 (or of k^2) would fail by far more
     assert abs(ratio_band - 1.0) < 0.25, (ratio_band, meas[sel] / pred[sel])
+
+
+def test_velocity_check_sign_and_amplitude():
+    """r = +1 for exactly linear velocities, -1 for the opposite sign, 0.5 for half the amplitude."""
+    rng = np.random.default_rng(6)
+    n, L, aHf = 48, 400.0, 3.0e-3
+    d, _ = _gauss_box((n, n, n), L / n, lambda k: 3e3 * (k / 0.05) ** -1.5, rng)
+    edges = np.logspace(np.log10(2 * np.pi / L), np.log10(np.pi * n / L), 20)
+    v = cd.linear_vz(d, L, aHf)
+    for fac in (1.0, -1.0, 0.5):
+        chk = cd.velocity_check(fac * v, d, L, aHf, edges)
+        assert abs(chk["r_lin"] - fac) < 1e-6, (fac, chk["r_lin"])
+    assert abs(cd.velocity_check(-v, d, L, aHf, edges)["amp_lin"] - 1.0) < 1e-6

@@ -257,6 +257,43 @@ def maeq8_prediction(k, psi_pix, w_pix, P_of_k_pix):
         return -s / k ** 2
 
 
+def linear_vz(delta, box_len, aHf_cm):
+    """
+    Linear-theory LOS velocity from the box's own density, in the convention eq 8 assumes:
+        v(k) = i a H f delta(k) k / k^2   ->   v_z(k) = i (a H f) delta(k) k_z / k^2
+    (infall towards overdensities). aHf_cm = a H f in [1/s] times MPC_CM, so v_z is in cm/s,
+    the units run_coeval_fields gives 21cmFAST's own v_z in.
+    """
+    n = delta.shape[0]
+    k1 = np.fft.fftfreq(n, d=box_len / n) * 2 * np.pi
+    kz = np.fft.rfftfreq(n, d=box_len / n) * 2 * np.pi
+    k2 = k1[:, None, None] ** 2 + k1[None, :, None] ** 2 + kz[None, None, :] ** 2
+    F = np.fft.rfftn(np.asarray(delta, np.float64) - np.mean(delta))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        G = np.where(k2 > 0, 1j * aHf_cm * kz[None, None, :] / k2, 0.0) * F
+    return np.fft.irfftn(G, s=delta.shape, axes=(0, 1, 2))
+
+
+def velocity_check(vz, delta, box_len, aHf_cm, k_edges, k_max=0.1):
+    """
+    How 21cmFAST's v_z relates to the linear velocity eq 8 assumes, from one box:
+      r(k)   = P(v_z, v_lin) / P(v_lin, v_lin)   (sign AND amplitude; +1 = eq 8's convention exactly)
+      amp(k) = sqrt(P(v_z) / P(v_lin))          (amplitude only)
+    Returns dict with the binned arrays and the medians over k < k_max (linear scales).
+    """
+    vl = linear_vz(delta, box_len, aHf_cm)
+    P_x = power3d_cross(vz, vl, box_len, k_edges)
+    P_l = power3d_cross(vl, vl, box_len, k_edges)
+    P_v = power3d_cross(vz, vz, box_len, k_edges)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = P_x / P_l
+        amp = np.sqrt(P_v / P_l)
+    kc = np.sqrt(k_edges[:-1] * k_edges[1:])
+    sel = (kc < k_max) & np.isfinite(r)
+    return {"r": r, "amp": amp, "r_lin": float(np.median(r[sel])) if sel.any() else np.nan,
+            "amp_lin": float(np.median(amp[sel])) if sel.any() else np.nan}
+
+
 def interp_P(k_edges, P, k):
     """Interpolate a binned P(k) (bin centres, log k) at k; NaN outside the measured range."""
     kc = np.sqrt(k_edges[:-1] * k_edges[1:])

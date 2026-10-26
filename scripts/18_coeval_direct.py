@@ -12,6 +12,8 @@
 #    kSZ just beyond each slab edge and biases low -- removed 2026-10-26.)
 #   maeq8    : Ma+18 eq 8 Limber for LINEAR kSZ x 21cm, P_{delta T21} measured from the box
 #   maeq8_lin: the same with Ma's linearised T21 = T0[(1-x_e) delta - x_e delta_x]
+#   maeq8_vcal: maeq8 rescaled by the velocity normalisation measured from each box (velocity check:
+#              r = P(v_z, v_lin)/P(v_lin, v_lin) at k < 0.1/Mpc, printed per snapshot; +1 = linear theory)
 #
 # The boxes are REGENERATED with run_coeval_fields(z, random_seed=seed) -- the same call,
 # seed and parameters 01_stitch_lightcones.py used, so they are the same realisation as the
@@ -41,7 +43,7 @@ from ksz2_21cm.correlation import coeval_direct as cd
 from ksz2_21cm.ksz.optical_depth import analytic_tau_below
 from ksz2_21cm.simulate.stitch_from_coeval import build_los_z_grid, comoving_distance_mpc
 from ksz2_21cm.utils.config import load_config
-from ksz2_21cm.utils.constants import C_CGS, ne0_cgs
+from ksz2_21cm.utils.constants import C_CGS, MPC_CM, ne0_cgs
 from ksz2_21cm.utils.cosmology import get_cosmology
 
 ap = argparse.ArgumentParser()
@@ -136,13 +138,20 @@ for z in snaps:
     else:
         P_ddx = np.zeros_like(P_dd)
     kap = cd.limber_kernels(theta, tb, binner, cell, k_par_min, k_hp)
+    a_s, H_s, f_s, _ = cd.background([z])
+    vchk = cd.velocity_check(vz, delta, BOX_LEN, float(a_s[0] * H_s[0] * f_s[0]) * MPC_CM, k_edges3)
     META.append({"z": z, "x_e": xe, "T0": T0, "Tb_mean": float(tb.mean()),
                  "P_dT": P_dT, "P_dd": P_dd, "P_ddx": P_ddx,
-                 "kappa_zhou": kap["zhou"], "kappa_masq": kap["masq"]})
-    print(f"  snapshot z={z:5.2f}: x_e={xe:.3f}  <Tb>={tb.mean():6.2f} mK  T0={T0:6.2f} mK   ({time.time() - t0:.0f}s)", flush=True)
+                 "kappa_zhou": kap["zhou"], "kappa_masq": kap["masq"],
+                 "v_r": vchk["r"], "v_amp": vchk["amp"], "v_r_lin": vchk["r_lin"], "v_amp_lin": vchk["amp_lin"]})
+    print(f"  snapshot z={z:5.2f}: x_e={xe:.3f}  <Tb>={tb.mean():6.2f} mK  T0={T0:6.2f} mK  "
+          f"v_z vs linear (k<0.1): r={vchk['r_lin']:+.3f} amp={vchk['amp_lin']:.3f}   ({time.time() - t0:.0f}s)", flush=True)
 
 snap_z = np.array(snaps)
 xe_snap = np.array([m["x_e"] for m in META])
+vr_snap = np.array([m["v_r_lin"] for m in META])
+print("velocity check: r = P(v_z, v_lin)/P(v_lin, v_lin) at k < 0.1/Mpc per snapshot (+1 = eq 8's linear convention): "
+      + ", ".join(f"z={z:g}: {r:+.3f}" for z, r in zip(snap_z, vr_snap)))
 
 # ── LOS grid, kSZ weights, background ────────────────────────────────────────
 z_arr = build_los_z_grid(min(Z_ALL), max(Z_ALL), cell)               # the grid 01 stitched on
@@ -197,6 +206,9 @@ for z0 in z0_list:
             "sq_limber": lim[f"masq_{v}"],
             "lin_maeq8": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel], P_at_pixels("P_dT", z_arr[ip])),
             "lin_maeq8_lin": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel], P_at_pixels("P_dT_lin", z_arr[ip])),
+            # eq 8 with the velocity normalisation MEASURED from the box (r per snapshot, interpolated in z)
+            "lin_maeq8_vcal": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel],
+                                                  P_at_pixels("P_dT", z_arr[ip]) * np.interp(z_arr[ip], snap_z, vr_snap)[:, None]),
         }
     chi_z0 = float(cosmo.comoving_distance(z0).value)
     results[float(z0)] = {
@@ -216,6 +228,8 @@ out = {
              "P_dd": np.array([m["P_dd"] for m in META]), "P_ddx": np.array([m["P_ddx"] for m in META]),
              "kappa_zhou": np.array([m["kappa_zhou"] for m in META]),
              "kappa_masq": np.array([m["kappa_masq"] for m in META]),
+             "v_r": np.array([m["v_r"] for m in META]), "v_amp": np.array([m["v_amp"] for m in META]),
+             "v_r_lin": vr_snap, "v_amp_lin": np.array([m["v_amp_lin"] for m in META]),
              "k_centers": k_c, "z_arr": z_arr[use], "W": W[use], "psi_par": psi[use], "x_e_pix": xe_pix[use],
              "slab_dz": slab_dz, "narrow_dz": args.narrow_dz, "k_par_min": k_par_min,
              "ell_min_ksz": args.ell_min_ksz, "chi_ksz": args.chi_ksz, "fake_boxes": bool(args.fake_boxes)},
