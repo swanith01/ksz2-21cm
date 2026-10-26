@@ -1,0 +1,19 @@
+#!/bin/bash
+#PBS -N fingerprint
+#PBS -q workq
+#PBS -l select=1:ncpus=16:mem=48gb
+#PBS -l walltime=02:00:00
+#PBS -o logs/fingerprint.out
+#PBS -e logs/fingerprint.err
+# One 21cmFAST coeval box (seed 1, z = 8) fingerprinted by scripts/20, to compare with the same
+# run on CSD3 (slurm/fingerprint.sbatch). The .h5 cache is deleted at the end.
+#   qsub pbs/fingerprint.pbs
+cd $PBS_O_WORKDIR
+mkdir -p logs
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ksz2-21cm
+export OMP_NUM_THREADS=16
+SEED=${SEED:-1}; Z=${Z:-8.0}
+python scripts/20_coeval_fingerprint.py --config configs/variants/stitched_256.yaml --seed $SEED --z $Z \
+    --out logs/fingerprint_seed${SEED}_z${Z}_swarm.txt
+echo "DONE $(date)"
