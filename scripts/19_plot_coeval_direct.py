@@ -4,8 +4,8 @@
 #
 # Coeval-box estimates (script 18) against the stitched lightcone (scripts 04 / 04b) for
 # the SAME seeds, one figure per statistic, D_ell vs chunk centre z0 at fixed ell:
-#   coeval_vs_lc_zhou.{png,pdf}    kSZ^2 x 21cm^2     lightcone | slab | Limber (bispectrum)
-#   coeval_vs_lc_ma_sq.{png,pdf}   kSZ^2 x 21cm       lightcone | slab | Limber (bispectrum)
+#   coeval_vs_lc_zhou.{png,pdf}    kSZ^2 x 21cm^2     lightcone | Limber (bispectrum)
+#   coeval_vs_lc_ma_sq.{png,pdf}   kSZ^2 x 21cm       lightcone | Limber (bispectrum)
 #   coeval_vs_lc_ma_lin.{png,pdf}  kSZ x 21cm         lightcone | Ma eq 8 (measured P_dT) | Ma eq 8 (linearised T21)
 # Bands / bars = s.e.m. over seeds. Units as 06 / 08 with --chi-norm z0 (divided by chi(z0)^2).
 # Also: coeval_vs_lc_data.npz (every curve) and coeval_vs_lc_summary.csv (per estimator and ell:
@@ -49,9 +49,9 @@ U_ZHOU = (T_CMB_K * 1e6) ** 2 * 1e6          # (dT/T)^2 mK^2 -> muK^4
 U_LIN, U_SQ = T_CMB_K * 1e6, (T_CMB_K * 1e6) ** 2   # -> mK muK, mK muK^2 (as 08)
 STATS = {
     "zhou": dict(ells=[400, 800, 1600], unit=U_ZHOU, ylab=r"$D_\ell/\chi^2$ [$\mu$K$^4$/Mpc$^2$]",
-                 title=r"kSZ$^2\times$21cm$^2$ (Zhou)", est=[("slab", "coeval slabs"), ("limber", "Limber (bispectrum)")]),
+                 title=r"kSZ$^2\times$21cm$^2$ (Zhou)", est=[("limber", "coeval Limber (bispectrum)")]),
     "ma_sq": dict(ells=[500, 1000, 3000], unit=U_SQ, ylab=r"$D_\ell/\chi^2$ [mK $\mu$K$^2$/Mpc$^2$]",
-                  title=r"kSZ$^2\times$21cm (Ma)", est=[("sq_slab", "coeval slabs"), ("sq_limber", "Limber (bispectrum)")]),
+                  title=r"kSZ$^2\times$21cm (Ma)", est=[("sq_limber", "coeval Limber (bispectrum)")]),
     "ma_lin": dict(ells=[100, 500], unit=U_LIN, ylab=r"$D_\ell/\chi^2$ [mK $\mu$K/Mpc$^2$]",
                    title=r"kSZ$\times$21cm (Ma)", est=[("lin_maeq8", r"Ma eq 8, measured $P_{\delta T}$"),
                                                        ("lin_maeq8_lin", r"Ma eq 8, linearised $T_{21}$")]),

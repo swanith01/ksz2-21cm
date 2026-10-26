@@ -5,8 +5,11 @@
 # kSZ x 21cm statistics straight from the 21cmFAST COEVAL BOXES of one seed (no stitching),
 # to compare with the stitched-lightcone results of scripts 04 (Zhou: kSZ^2 x 21cm^2) and
 # 04b (Ma: kSZ x 21cm and kSZ^2 x 21cm). Estimators: src/ksz2_21cm/correlation/coeval_direct.py
-#   slab     : per-snapshot slabs of the box, kSZ^2 from each slab alone ("diagonal")
-#   limber   : per-snapshot whole-box kernels (squeezed bispectrum, Kramer+25 eqs 9-11 analogue)
+#   limber   : per-snapshot whole-box kernels (squeezed bispectrum, Kramer+25 eqs 9-11 analogue),
+#              Limber-summed along the LOS. Kramer's eq 9 is derived from the SINGLE full kSZ map
+#              squared, so this respects the single-map logic in expectation.
+#   (No "slab" estimator: squaring per-snapshot slab maps instead of the one full map drops the
+#    kSZ just beyond each slab edge and biases low -- removed 2026-10-26.)
 #   maeq8    : Ma+18 eq 8 Limber for LINEAR kSZ x 21cm, P_{delta T21} measured from the box
 #   maeq8_lin: the same with Ma's linearised T21 = T0[(1-x_e) delta - x_e delta_x]
 #
@@ -116,14 +119,13 @@ binner = cd.Binner(HII_DIM, cell, k_bins)
 k_c = binner.k_centers
 k_edges3 = np.logspace(np.log10(dk), np.log10(np.sqrt(3) * np.pi / cell), 60)
 
-# ── pass over snapshots: fields kept in memory (theta, T21), per-snapshot spectra/kernels ──
+# ── pass over snapshots: per-snapshot spectra and kernels (boxes are not kept) ──
 t0 = time.time()
-TH, TB, META = {}, {}, []
+META = []
 for z in snaps:
     delta, xH, vz, tb = load_snapshot(z)
     xHII = 1.0 - xH
     theta = ((1.0 + delta) * xHII * vz / np.float32(C_CGS)).astype(np.float32)     # (1+delta) x_e v/c
-    TH[z], TB[z] = theta, tb
     xe = float(xHII.mean())
     denom = float(np.mean(xH * (1.0 + delta)))
     T0 = float(tb.mean()) / denom if denom > 0 else np.nan
@@ -179,17 +181,10 @@ for z0 in z0_list:
         continue
     pos_in = {int(p): i for i, p in enumerate(idx)}
     groups = cd.contiguous_groups(assign, idx)
-    slab = {}
     lim = {"zhou": np.zeros(len(k_c))} | {f"masq_{v}": np.zeros(len(k_c)) for v in VARS}
     for si, g in groups:
-        z = float(snap_z[si])
-        if len(g) > HII_DIM:
-            print(f"  WARNING z0={z0}: slab of {len(g)} cells for snapshot {z} is longer than the box ({HII_DIM}); it wraps")
         loc = np.array([pos_in[int(p)] for p in g])
         w_g = {v: wins[v][loc] for v in VARS}
-        c = cd.slab_contribution(TH[z], TB[z], W[g], w_g, binner, cell, k_par_min, k_hp, n_chunk=len(idx))
-        for kname, arr in c.items():
-            slab[kname] = arr if kname not in slab else slab[kname] + arr
         W2 = W[g] ** 2
         lim["zhou"] += np.sum(W2 * w_g["slab"]) * META[si]["kappa_zhou"]
         for v in VARS:
@@ -199,7 +194,6 @@ for z0 in z0_list:
         sel = wins[v] > 0
         ip = idx[sel]
         variants[v] = {
-            "sq_slab": slab.get(f"masq_{v}", np.full(len(k_c), np.nan)),
             "sq_limber": lim[f"masq_{v}"],
             "lin_maeq8": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel], P_at_pixels("P_dT", z_arr[ip])),
             "lin_maeq8_lin": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel], P_at_pixels("P_dT_lin", z_arr[ip])),
@@ -208,11 +202,11 @@ for z0 in z0_list:
     results[float(z0)] = {
         "z0": float(z0), "chi_z0": chi_z0, "ell": k_c * chi_z0, "k_centers": k_c,
         "x_e_z0": float(np.interp(z0, snap_z, xe_snap)),
-        "zhou": {"slab": slab["zhou"], "limber": lim["zhou"]},
+        "zhou": {"limber": lim["zhou"]},
         "variants": variants,
         "groups": [(float(snap_z[si]), int(len(g))) for si, g in groups], "n_chunk": int(len(idx)),
     }
-    print(f"  z0={z0:5.2f}: {len(idx)} pixels in {len(groups)} snapshot slab(s) {results[float(z0)]['groups']}", flush=True)
+    print(f"  z0={z0:5.2f}: {len(idx)} pixels from {len(groups)} snapshot(s) {results[float(z0)]['groups']}", flush=True)
 
 out = {
     "seed": seed, "results": results,

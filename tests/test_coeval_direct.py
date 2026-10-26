@@ -2,7 +2,6 @@
 Synthetic tests for src/ksz2_21cm/correlation/coeval_direct.py (scripts/18).
 
   1. ksz_pixel_weights reproduces lightcone_integral.compute_ksz_map exactly.
-  2. Slab estimator == the lightcone workers' own recipe when one snapshot fills the chunk.
   3. Limber kernels: C(Theta^2 x X) scales as W^2 kappa for uniform weights.
   4. power3d_cross: white noise gives variance x cell volume.
   5. Ma eq 8: the Limber prediction matches the measured kSZ x 21cm cross power of a
@@ -56,25 +55,6 @@ def test_weights_reproduce_ksz_map():
     theta = d1 * xh * v / (C_CGS / MPC_CM)
     got = np.tensordot(theta, W, axes=([2], [0]))
     assert np.allclose(got, ref, rtol=1e-12, atol=0)
-
-
-def test_slab_matches_lightcone_recipe():
-    rng = np.random.default_rng(2)
-    N, cell, kpm, k_hp = 32, 3.125, 0.01, 0.02
-    theta = rng.standard_normal((N, N, N))
-    tb = 20.0 + rng.standard_normal((N, N, N))
-    W = rng.uniform(0.5, 1.5, N)
-    b = cd.Binner(N, cell, np.logspace(np.log10(2 * np.pi / (N * cell)), np.log10(0.9 * np.pi / cell * 1.4), 12))
-    w = {"slab": np.full(N, 1.0 / N)}
-    got = cd.slab_contribution(theta, tb, W, w, b, cell, kpm, k_hp, n_chunk=N)
-    # reference: 04's recipe (3D fftn k_par filter, square, LOS mean) and 04b's (HP, square x LOS mean)
-    Theta = np.tensordot(theta, W, axes=([2], [0]))
-    kz = np.fft.fftfreq(N, d=cell) * 2 * np.pi
-    Tf = np.real(np.fft.ifftn(np.fft.fftn(tb) * (np.abs(kz)[None, None, :] > kpm)))
-    ref_z = b.cross(b.fft(Theta ** 2), b.fft((Tf ** 2).mean(axis=2)))
-    ref_m = b.cross(b.fft(b.highpass(Theta, k_hp) ** 2), b.fft(tb.mean(axis=2)))
-    assert np.allclose(got["zhou"], ref_z, rtol=1e-10, equal_nan=True)
-    assert np.allclose(got["masq_slab"], ref_m, rtol=1e-10, equal_nan=True)
 
 
 def test_limber_kernel_scaling():

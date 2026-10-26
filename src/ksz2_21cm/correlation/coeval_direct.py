@@ -4,41 +4,27 @@
 # kSZ x 21cm statistics computed DIRECTLY from coeval snapshot boxes (no lightcone
 # stitching, no interpolation between snapshots, no wrap-cycle rotations), to set
 # against the stitched-lightcone results of scripts 04 (Zhou) and 04b (Ma).
-# Approach vendored from ksz-lae-xcorr (correlation/coeval_cross.py, scripts/44) and
-# rewritten here for the 21cm side; nothing is imported from that repo.
+# Written for this repo; nothing is imported from ksz-lae-xcorr.
 #
-# Three coeval estimators, all on the SAME LOS pixel grid, kSZ weights, 21cm windows
-# and 2D k binning as the lightcone workers:
+# Two coeval estimators, on the SAME LOS pixel grid, kSZ weights, 21cm windows and 2D k
+# binning as the lightcone workers. Both respect the fact that the observed kSZ is ONE map
+# integrated over all of reionization and squared once (both are Limber expressions derived
+# from that single map). A per-snapshot "slab" estimator (square each slab's own kSZ map, as
+# ksz-lae-xcorr scripts/44 does) was tried and removed on 2026-10-26: squaring slab maps
+# instead of the full map drops the kSZ just beyond every slab edge, which still correlates
+# with the 21cm inside, and so biases the squared statistics low.
 #
-# 1. SLAB ("diagonal") estimator, for the SQUARED statistics
-#      Zhou  kSZ^2 x 21cm^2   and   Ma  kSZ^2 x 21cm   (slice / narrow / slab windows).
-#    Every LOS pixel of the chunk z0 +- dz/2 is assigned to its nearest snapshot. The run
-#    of pixels belonging to snapshot s (n_s pixels) is a slab of n_s cells of that
-#    snapshot's own box:
-#        Theta_s = sum_j W_i(j) theta[:, :, o+j]          (theta = (1+delta) x_e v_z / c)
-#        X_s     = that slab's 21cm map with the window weights of its pixels
-#    and the statistic is  sum_s C( [Theta_s]^2 , X_s ),  averaged over the
-#    non-overlapping slab positions o in the box. Pairs of pixels belonging to
-#    DIFFERENT snapshots (and all kSZ from outside the chunk) are dropped: this is
-#    exactly what differs from the lightcone, where the kSZ map is the full LOS
-#    integral. For the Zhou 21cm^2 map, the k_par filter acts on the slab's own LOS
-#    (the lightcone filters the whole chunk; with k_par_min = 0.01 both remove only
-#    the LOS-mean mode of what they act on).
-#    NOT used for linear kSZ x 21cm: cutting the LOS into slabs leaves boundary terms
-#    of the longitudinal-velocity integral at every slab edge, which cancel between
-#    neighbouring slabs only if the cross-slab pairs are kept.
-#
-# 2. LIMBER / squeezed-bispectrum estimator (Kramer+25 eqs 9-11 analogue), for the same
-#    squared statistics. Per snapshot, project the WHOLE periodic box with unit weights
+# 1. LIMBER / squeezed-bispectrum estimator (Kramer+25 eqs 9-11 analogue), for the SQUARED
+#    statistics (Zhou kSZ^2 x 21cm^2, Ma kSZ^2 x 21cm). Per snapshot, project the WHOLE periodic box with unit weights
 #    (Theta_box = sum over all cells of theta, X_box = LOS mean of the 21cm field or of
 #    its k_par-filtered square) and measure  kappa_s(k) = C( Theta_box^2, X_box ).
 #    In the Limber limit (correlation length << window) kappa_s is the k_par = 0
 #    triangle power spectrum of the hybrid bispectrum <X q q> per unit LOS length, and
 #        C(k) = sum_{i in chunk} W_i^2 w_i kappa_{s(i)}(k)
-#    for kSZ weights W_i and 21cm window weights w_i (sum w_i = 1). This keeps pairs
-#    across slab edges (unlike 1) but still drops correlations longer than the box.
+#    for kSZ weights W_i and 21cm window weights w_i (sum w_i = 1). It drops only
+#    correlations longer than the box (800 Mpc).
 #
-# 3. Ma+18 eq 8 (Limber, linear theory) for LINEAR kSZ x 21cm. Writing the kSZ map as
+# 2. Ma+18 eq 8 (Limber, linear theory) for LINEAR kSZ x 21cm. Writing the kSZ map as
 #    Theta = int ds W(s) x_e(s) v_par/c with linear velocities v(k) = i a H f delta k/k^2,
 #    integrating by parts along the LOS and taking the k_par = 0 (Limber) limit gives,
 #    in the flat-sky comoving units of our 2D maps,
@@ -181,58 +167,7 @@ def kpar_filter_los(cube, cell_mpc, k_par_min):
     return np.real(np.fft.ifft(F * (kz > k_par_min)[None, None, :], axis=2))
 
 
-def _take(cube, o, n):
-    nb = cube.shape[2]
-    if o + n <= nb:
-        return cube[:, :, o:o + n]
-    return np.take(cube, (o + np.arange(n)) % nb, axis=2)
-
-
-def slab_offsets(n_pix, n_box):
-    """Non-overlapping slab start cells in the box ([0] if the slab fills it)."""
-    if n_pix >= n_box:
-        return [0]
-    return list(range(0, n_box - n_pix + 1, n_pix))
-
-
-# ── 1. slab estimator ────────────────────────────────────────────────────────
-
-
-def slab_contribution(theta, tb, W_pix, w_pix, binner, cell_mpc, k_par_min, k_hp, n_chunk):
-    """
-    One snapshot, one chunk group (n_s pixels): contributions to
-      'zhou'          C( Theta^2, mean_chunk[ (k_par-filtered T21)^2 ] )   (this group's share)
-      'masq_<var>'    C( HP(Theta)^2, sum_j w_var[j] T21_j )
-    averaged over the non-overlapping slab positions in the box.
-
-    theta, tb : (N, N, n_box) boxes (theta = (1+delta) x_e v_z/c, tb in mK); axis 2 = LOS
-    W_pix     : (n_s,) kSZ weights of the group's pixels
-    w_pix     : {variant: (n_s,) 21cm window weights of the group's pixels (chunk-normalised)}
-    n_chunk   : number of pixels in the whole chunk (Zhou map is the chunk LOS mean)
-    k_hp      : kSZ high-pass |k| cut for the Ma kSZ^2 map (ell_min_ksz / chi_ksz)
-    """
-    n_s, n_box = len(W_pix), theta.shape[2]
-    offs = slab_offsets(n_s, n_box)
-    acc = {}
-    for o in offs:
-        th = _take(theta, o, n_s)
-        t = _take(tb, o, n_s)
-        Theta = np.tensordot(th, W_pix, axes=([2], [0]))
-        F_sq = binner.fft(Theta ** 2)
-        F_hp2 = binner.fft(binner.highpass(Theta, k_hp) ** 2)
-        tf = kpar_filter_los(t, cell_mpc, k_par_min)
-        X_z = (tf ** 2).sum(axis=2) / float(n_chunk)
-        res = {"zhou": binner.cross(F_sq, binner.fft(X_z))}
-        for v, w in w_pix.items():
-            if np.any(w != 0):
-                X = np.tensordot(t, w, axes=([2], [0]))
-                res[f"masq_{v}"] = binner.cross(F_hp2, binner.fft(X))
-        for k, c in res.items():
-            acc[k] = c / len(offs) if k not in acc else acc[k] + c / len(offs)
-    return acc
-
-
-# ── 2. Limber / squeezed-bispectrum kernels ──────────────────────────────────
+# ── 1. Limber / squeezed-bispectrum kernels ──────────────────────────────────
 
 
 def limber_kernels(theta, tb, binner, cell_mpc, k_par_min, k_hp):
@@ -252,7 +187,7 @@ def limber_kernels(theta, tb, binner, cell_mpc, k_par_min, k_hp):
     }
 
 
-# ── 3. Ma+18 eq 8 ────────────────────────────────────────────────────────────
+# ── 2. Ma+18 eq 8 ────────────────────────────────────────────────────────────
 
 
 def power3d_cross(a, b, box_len, k_edges):
