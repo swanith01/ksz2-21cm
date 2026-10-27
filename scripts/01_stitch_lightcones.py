@@ -70,6 +70,9 @@ HII_DIM      = cfg["coeval_ksz"]["hii_dim"]
 BOX_LEN      = cfg["coeval_ksz"]["box_len"]
 Z_SNAPSHOTS  = sorted(cfg["coeval_ksz"]["z_snapshots"])
 N_THREADS    = cfg["simulation"]["n_threads"]
+# Optional 21cmFAST astro_params (e.g. {"HII_EFF_FACTOR": 17.0} for the reionization-history scan).
+# Absent (every existing config) -> None -> 21cmFAST's defaults, exactly the old behaviour.
+ASTRO_PARAMS = cfg.get("astro_params") or None
 
 cell_size = BOX_LEN / HII_DIM
 z_arr = build_los_z_grid(min(Z_SNAPSHOTS), max(Z_SNAPSHOTS), cell_size)
@@ -82,6 +85,7 @@ print(f"z_snapshots: {len(Z_SNAPSHOTS)} points, "
 print(f"z_arr (LOS pixels): {len(z_arr)} points, uniform comoving spacing")
 print(f"Seeds: {RANDOM_SEEDS}  (N={N_SEEDS})")
 print(f"wrap_cycle_seed = random_seed (per-seed convention, see header)")
+print(f"astro_params: {ASTRO_PARAMS if ASTRO_PARAMS else '21cmFAST defaults (HII_EFF_FACTOR = 30)'}")
 
 
 _NPZ_KEYS = {"density", "xH_box", "velocity_z", "brightness_temp", "z_arr", "pos_axis"}
@@ -118,7 +122,7 @@ def _cleanup_h5(seed_cache_dir):
 
 def _stitch_one_seed(args_tuple):
     (seed, seed_cache_dir, z_snapshots, z_arr, hii_dim, box_len,
-     n_threads, keep_h5) = args_tuple
+     n_threads, keep_h5, astro_params) = args_tuple
 
     os.makedirs(seed_cache_dir, exist_ok=True)
     npz_path = os.path.join(seed_cache_dir, f"stitched_lightcone_seed{seed}.npz")
@@ -148,7 +152,7 @@ def _stitch_one_seed(args_tuple):
             HII_DIM=hii_dim, BOX_LEN=box_len,
             cache_dir=seed_cache_dir,
             N_THREADS=n_threads, random_seed=seed,
-            wrap_cycle_seed=seed,
+            wrap_cycle_seed=seed, astro_params=astro_params,
         )
         np.savez_compressed(
             tmp_path,
@@ -190,7 +194,7 @@ with ProcessPoolExecutor(max_workers=N_WORKERS, mp_context=mp_ctx) as ex:
         seed_cache_dir = os.path.join(cache_dir, f"seed_{seed}")
         fut = ex.submit(_stitch_one_seed, (
             seed, seed_cache_dir, Z_SNAPSHOTS, z_arr, HII_DIM, BOX_LEN, N_THREADS,
-            args.keep_h5,
+            args.keep_h5, ASTRO_PARAMS,
         ))
         futures[fut] = seed
 
