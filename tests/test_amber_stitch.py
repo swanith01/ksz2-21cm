@@ -41,17 +41,40 @@ def _smooth_field(rng, sigma=2.0):
     return f / f.std()
 
 
-def make_run(root, rng=None, drop_tb=None):
+# the amber_params / n_e0 that scripts/amber/make_amber_input.py (preset planck18) writes to <run>/amber_run.json
+AMBER_META = dict(cosmology_preset="planck18", ne0_cgs=2.0640e-07,
+                  amber_params=dict(om=0.3110747613306647, ol=0.6888463055445441, ob=0.04897,
+                                    orad=7.893312479126026e-05, h=0.6766))
+
+
+def make_run(root, rng=None, drop_tb=None, white=False, bad_rho=False, const_mom=False, meta=True):
+    """Synthetic AMBER run in the real byte layout. white: rho = 1 + white noise (for the power-loss test);
+    bad_rho: a few cells of rho2 near zero / negative in every snapshot (AMBER's interlacing ringing), momentum normal;
+    const_mom: mom[c] = 10 (c + 1) km/s everywhere (to see which component is used as the LOS velocity)."""
+    import json
     rng = rng or np.random.default_rng(0)
     for sub in ("cmb", "21cm", "reion"):
         os.makedirs(os.path.join(root, "output", sub), exist_ok=True)
+    if meta:
+        json.dump(AMBER_META, open(os.path.join(root, "amber_run.json"), "w"))
     g = _smooth_field(rng)
     zre = (5.8 + 0.15 * _smooth_field(rng)).astype(np.float32)          # reionization between ~5.3 and ~6.3
     zre.ravel(order="F").tofile(os.path.join(root, "output", "reion", "zre_test.dat"))
     truth = {}
     for z in SNAP_Z:
         rho = np.exp(0.3 * g * 5.0 / (1 + z)); rho = (rho / rho.mean()).astype(np.float32)
+        if white:
+            rho = (1.0 + 0.3 * rng.standard_normal((N, N, N))).astype(np.float32)
+        if bad_rho:
+            rho = rho.copy()
+            rho[2, 3, :4] = 1e-3
+            rho[5, 6, 4:8] = -0.5
+            rho[9, 1, 2] = 2e-4
         mom = np.stack([rho * _smooth_field(rng) * 50 for _ in range(3)]).astype(np.float32)   # (3,N,N,N)
+        if bad_rho:
+            mom[:, 2, 3, :4] = 40.0; mom[:, 5, 6, 4:8] = 40.0; mom[:, 9, 1, 2] = 40.0   # momentum itself is fine
+        if const_mom:
+            mom = np.stack([np.full((N, N, N), 10.0 * (c + 1), np.float32) for c in range(3)])
         a = np.concatenate([[z], rho.ravel(order="F"), mom.ravel(order="F")]).astype("<f4")
         a.tofile(os.path.join(root, "output", "cmb", f"fields_z={z:05.2f}.dat"))
         tb = np.where(z > zre, T0 * rho, 0.0).astype("<f4")
@@ -163,16 +186,36 @@ def test_script_end_to_end():
         assert r.returncode == 0, r.stdout + r.stderr
         npz = os.path.join(d, "cache", "seed_1", "stitched_lightcone_seed1.npz")
         z = np.load(npz)
-        for key in ("density", "xH_box", "velocity_z", "brightness_temp", "z_arr", "pos_axis"):
+        for key in ("density", "xH_box", "q_z", "brightness_temp", "z_arr", "pos_axis", "ne0_cgs", "rho2_min"):
             assert key in z.files, key
-        assert str(z["source"]) == "amber" and float(z["tb_scale"]) == 1.0
+        assert "velocity_z" not in z.files                       # v2 never forms v = mom/rho
+        assert str(z["source"]) == "amber" and float(z["tb_scale"]) == 1.0 and "v2" in str(z["stitcher"])
         assert len(glob.glob(os.path.join(run, "output/cmb/fields_z=*.dat"))) == len(SNAP_Z)   # not deleted by default
+        # a cached v2 file is reused, but never silently as a v1 (or the reverse)
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        assert r.returncode == 0 and "cached" in r.stdout, r.stdout + r.stderr
+        r = subprocess.run(cmd + ["--legacy"], capture_output=True, text=True)
+        assert r.returncode != 0 and "another cache dir" in r.stdout, r.stdout + r.stderr
+        os.remove(npz)
+        # the legacy stitcher still reproduces the v1 file contract
+        r = subprocess.run(cmd + ["--legacy"], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        zl = np.load(npz)
+        for key in ("density", "xH_box", "velocity_z", "brightness_temp"):
+            assert key in zl.files, key
         os.remove(npz)
         r = subprocess.run(cmd + ["--delete-raw"], capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
         assert glob.glob(os.path.join(run, "output/cmb/fields_z=*.dat")) == []
         assert len(glob.glob(os.path.join(run, "output/21cm/Tb_*.dat"))) == len(SNAP_Z)        # 21cm kept
         assert os.path.exists(os.path.join(run, "output/reion/zre_test.dat"))
+        # config whose cosmology is not the run's: refused
+        bad = cfg.replace("om: 0.3110747613306647", "om: 0.30")
+        badp = os.path.join(d, "bad.yaml"); open(badp, "w").write(bad)
+        os.remove(npz)
+        make_run(run)
+        r = subprocess.run([c if c != cfgp else badp for c in cmd], capture_output=True, text=True)
+        assert r.returncode != 0 and "cosmology" in (r.stdout + r.stderr), r.stdout + r.stderr
 
 
 if __name__ == "__main__":

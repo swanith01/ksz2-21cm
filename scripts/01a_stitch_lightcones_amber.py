@@ -15,8 +15,16 @@
 # --tb-scale 0.925 (= 1/1.081) explicitly if an absolute comparison with 21cmFAST needs it. The factor is recorded
 # in the npz either way.
 #
-# Memory: all snapshots x 4 fields are held at once (about 7.5 GB at N=256, 28 snapshots) plus ~2 GB output, per
-# worker. Default is one worker; raise --workers only with enough memory.
+# STITCHER v2 (2026-10-27, the three ksz-pipeline fixes; simulate/amber_stream.py). Default now:
+#   * kSZ integrand q = x_HII * mom2_los built cell by cell per snapshot, NO v = mom/rho  -> npz key q_z [cm/s]
+#     (there is no velocity_z any more; 02 integrates q_z when it is present);
+#   * wrap cycles decorrelated by EXACT re-orientation (random LOS axis + integer shifts per cycle), not by the
+#     bilinear in-plane rotation (--geometry rotate keeps that, for A/B tests only);
+#   * chi(z) from the run's own cosmology (<run>/amber_run.json), which must equal config cosmology.amber.
+#   --legacy runs the v1 stitcher (v = mom/rho, bilinear rotation, Planck18 chi) ONLY to reproduce the Oct 21-23
+#   AMBER products; do not use it for new science.
+# Memory (v2): snapshots are memory-mapped and walked slice by slice, so a worker needs only the 2-3 GB output (v1
+# held all snapshots, about 7.5 GB at N=256). The raw dumps are read many times, so keep them on fast storage.
 #
 # Usage:
 #   python scripts/01a_stitch_lightcones_amber.py --config configs/variants/amber_q512.yaml \
@@ -35,6 +43,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import numpy as np
 
 from ksz2_21cm.utils.config import load_config, ensure_dirs
+from ksz2_21cm.utils.cosmology import RunCosmology
 from ksz2_21cm.simulate.stitch_from_coeval import build_los_z_grid
 from ksz2_21cm.simulate import amber_io as aio
 
@@ -42,31 +51,61 @@ TB_NATIVE_OVER_EXACT = 1.081   # measured in the CSD3 pilot (AMBER Madau-fit T0 
 
 
 def _stitch_one(job):
-    seed, run_dir, npz_path, h, tb_scale, delete_raw = job
-    from ksz2_21cm.simulate.stitch_from_amber import stitch_lightcone_from_amber
+    seed, run_dir, npz_path, h, tb_scale, delete_raw, geometry, legacy = job
     if os.path.exists(npz_path):
         try:
-            _ = np.load(npz_path)["z_arr"]
-            return seed, npz_path, 0.0, "cached"
+            z = np.load(npz_path)
+            _ = z["z_arr"]
+            is_v2 = "q_z" in z.files
         except Exception:
-            pass
+            is_v2 = None
+        if is_v2 is not None:
+            if is_v2 == bool(legacy):          # a v1 file where v2 was asked for (or the reverse): never reuse silently
+                return seed, None, 0.0, (f"failed: {npz_path} is a {'v2' if is_v2 else 'v1'} stitched file but "
+                                         f"{'--legacy' if legacy else 'v2'} was requested; use another cache dir")
+            return seed, npz_path, 0.0, "cached"
     t0 = time.time()
     try:
         L_h, N, snaps = aio.list_snapshots(run_dir)
         snap_z = np.array([s[0] for s in snaps])
-        z_arr = build_los_z_grid(snap_z.min(), snap_z.max(), L_h / h / N)
-        r = stitch_lightcone_from_amber(run_dir, z_arr, h, N=N, wrap_cycle_seed=seed, tb_scale=tb_scale)
         os.makedirs(os.path.dirname(npz_path), exist_ok=True)
         tmp = npz_path + ".tmp.npz"
-        np.savez_compressed(
-            tmp,
-            density=r["density"].astype(np.float32), xH_box=r["xH_box"].astype(np.float32),
-            velocity_z=r["velocity_z"].astype(np.float32),
-            brightness_temp=r["brightness_temp"].astype(np.float32),
-            z_arr=r["z_arr"], pos_axis=r["pos_axis"],
-            source=np.array("amber"), L_box_mpc_h=np.array(L_h), h=np.array(h), N=np.array(N),
-            tb_scale=np.array(tb_scale), tb_native_over_exact=np.array(TB_NATIVE_OVER_EXACT),
-            snap_z=r["snap_z"])
+        if legacy:
+            from ksz2_21cm.simulate.stitch_from_amber import stitch_lightcone_from_amber
+            z_arr = build_los_z_grid(snap_z.min(), snap_z.max(), L_h / h / N)
+            r = stitch_lightcone_from_amber(run_dir, z_arr, h, N=N, wrap_cycle_seed=seed, tb_scale=tb_scale)
+            np.savez_compressed(
+                tmp,
+                density=r["density"].astype(np.float32), xH_box=r["xH_box"].astype(np.float32),
+                velocity_z=r["velocity_z"].astype(np.float32),
+                brightness_temp=r["brightness_temp"].astype(np.float32),
+                z_arr=r["z_arr"], pos_axis=r["pos_axis"],
+                source=np.array("amber"), L_box_mpc_h=np.array(L_h), h=np.array(h), N=np.array(N),
+                tb_scale=np.array(tb_scale), tb_native_over_exact=np.array(TB_NATIVE_OVER_EXACT),
+                snap_z=r["snap_z"], stitcher=np.array("v1 legacy (v=mom/rho, bilinear rotation, Planck18 chi)"))
+        else:
+            from ksz2_21cm.simulate.amber_stream import (
+                stitch_lightcone_from_amber_stream, build_los_z_grid_cosmo, STITCHER)
+            cosmo = RunCosmology.from_run_dir(run_dir)
+            z_arr = build_los_z_grid_cosmo(snap_z.min(), snap_z.max(), L_h / cosmo.h / N, cosmo)
+            pos_axis = np.asarray(cosmo.comoving_distance(z_arr).value, float)
+            r = stitch_lightcone_from_amber_stream(run_dir, z_arr, pos_axis, cosmo.h, N=N, wrap_cycle_seed=seed,
+                                                   geometry=geometry, progress_every=500)
+            bt = r["brightness_temp"]
+            if tb_scale != 1.0:
+                bt = (bt * np.float32(tb_scale)).astype(np.float32)
+            np.savez_compressed(
+                tmp,
+                density=r["density"], xH_box=r["xH_box"], q_z=r["q_z"], brightness_temp=bt,
+                z_arr=r["z_arr"], pos_axis=r["pos_axis"],
+                source=np.array("amber"), L_box_mpc_h=np.array(L_h), h=np.array(cosmo.h), N=np.array(N),
+                tb_scale=np.array(tb_scale), tb_native_over_exact=np.array(TB_NATIVE_OVER_EXACT),
+                snap_z=r["snap_z"], stitcher=np.array(STITCHER), geometry=np.array(r["geometry"]),
+                reorient_views=r["views"],
+                ne0_cgs=np.array(cosmo.ne0_cgs if cosmo.ne0_cgs is not None else np.nan),
+                cosmology=np.array([cosmo.om, cosmo.ol, cosmo.orad, cosmo.h]), cosmology_label=np.array(cosmo.label),
+                rho2_mean=r["rho2_mean"], rho2_min=r["rho2_min"], rho2_frac_lt_0p05=r["rho2_frac_lt_0p05"],
+                rho2_frac_neg=r["rho2_frac_neg"])
         os.replace(tmp, npz_path)
         np.load(npz_path)["z_arr"]                     # confirm readable before any deletion
         if delete_raw:
@@ -83,7 +122,14 @@ def main():
     ap.add_argument("--run-dir-template", required=True,
                     help="AMBER run directory, with {seed} replaced per seed, e.g. /path/seed_{seed}")
     ap.add_argument("--seeds", type=int, nargs="*", default=None, help="default: simulation.random_seeds")
-    ap.add_argument("--h", type=float, default=0.6766)
+    ap.add_argument("--h", type=float, default=None,
+                    help="v2: read from <run>/amber_run.json (this option, if given, must equal it). "
+                         "--legacy: the old default 0.6766 if omitted")
+    ap.add_argument("--geometry", choices=["reorient", "rotate"], default="reorient",
+                    help="how wrap cycles are decorrelated: exact re-orientation (default) or v1's bilinear rotation (A/B only)")
+    ap.add_argument("--legacy", action="store_true",
+                    help="v1 stitcher (v = mom/rho, bilinear rotation, Planck18 chi). Only to reproduce the Oct 21-23 "
+                         "products; do not use for new science")
     ap.add_argument("--tb-scale", type=float, default=1.0)
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--delete-raw", action="store_true",
@@ -96,10 +142,31 @@ def main():
     cache_dir = cfg["paths"]["cache_dir"]
     seeds = a.seeds if a.seeds else cfg["simulation"]["random_seeds"]
 
-    # geometry guard: the downstream scripts take box_len and hii_dim from the config, not from the npz
+    # geometry + cosmology guard: the downstream scripts take box_len, hii_dim and chi(z) from the config, not from
+    # the npz, so all three must equal what the run was made with
     first = a.run_dir_template.format(seed=seeds[0])
     L_h, N, snaps = aio.list_snapshots(first)
-    box_mpc = L_h / a.h
+    if a.legacy:
+        print("WARNING: --legacy: v = mom2/rho2, bilinear rotation, Planck18 chi. Reproduction only.", flush=True)
+        h = a.h if a.h is not None else 0.6766
+    else:
+        cosmo = RunCosmology.from_run_dir(first)
+        h = cosmo.h
+        if a.h is not None and abs(a.h - h) > 1e-9:
+            raise SystemExit(f"--h {a.h} != h = {h} in {first}/amber_run.json")
+        ccos = cfg.get("cosmology", {})
+        if ccos.get("use") != "amber":
+            raise SystemExit("config cosmology.use must be 'amber' (with cosmology.amber: om, ol, orad, h) so that "
+                             "ell = k chi(z) downstream uses the run's own chi; see configs/variants/amber_q512.yaml")
+        if not cosmo.matches(RunCosmology.from_params(ccos["amber"])):
+            raise SystemExit(f"config cosmology.amber {ccos['amber']} != the run's {cosmo.params()} "
+                             f"(preset {cosmo.preset}); fix the config")
+        if cosmo.preset != "planck18":
+            print(f"NOTE: preset {cosmo.preset}: tau below the lightcone (optical_depth.analytic_tau_below) and the "
+                  f"sigma_T n_e0 in 02 are still the Planck18 / ne0_cgs() ones here", flush=True)
+        print(f"cosmology from {first}/amber_run.json: preset {cosmo.preset}, om={cosmo.om:.6f} ol={cosmo.ol:.6f} "
+              f"orad={cosmo.orad:.3e} h={h}   geometry={a.geometry}", flush=True)
+    box_mpc = L_h / h
     assert cfg["coeval_ksz"]["hii_dim"] == N == cfg["simulation"]["hii_dim"], \
         f"config hii_dim ({cfg['coeval_ksz']['hii_dim']}) != AMBER N ({N})"
     assert abs(cfg["coeval_ksz"]["box_len"] - box_mpc) < 1e-3 * box_mpc, \
@@ -113,7 +180,7 @@ def main():
     for s in seeds:
         d = os.path.join(cache_dir, f"seed_{s}")
         jobs.append((s, a.run_dir_template.format(seed=s), os.path.join(d, f"stitched_lightcone_seed{s}.npz"),
-                     a.h, a.tb_scale, a.delete_raw))
+                     h, a.tb_scale, a.delete_raw, a.geometry, a.legacy))
 
     t0 = time.time()
     results = {}

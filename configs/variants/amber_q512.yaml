@@ -65,20 +65,21 @@ cross_correlation:
   z_chunk_centres: [6, 7, 8, 9, 10, 11]
 
 # --- cosmology ---
-# NOTE: this cfg value feeds get_cosmology(cfg) -> FlatLambdaCDM(H0=67.66,
-# Om0=0.30964144154550644), used by the cross-corr worker's ell=k*chi(z0)
-# step. The VENDORED stitching/velocity/tau modules (simulate/stitch_
-# from_coeval.py etc.) separately hardcode astropy's literal Planck18
-# preset (H0=67.66, Om0=0.30966...) at import time -- NOT this cfg value.
-# The two differ in Om0 at the ~2e-5 level, negligible next to every other
-# systematic already flagged in this pipeline, but real and worth stating
-# plainly rather than leaving implicit -- don't "fix" this by threading cfg
-# through the vendored files without deciding that's worth diverging
-# further from upstream ksz-pipeline for.
+# STITCHER v2 (2026-10-27): chi(z) must be the cosmology the AMBER run was made with. `use: amber` gives every
+# script that calls get_cosmology(cfg) (04, 04b, ... : ell = k chi(z0)) a RunCosmology with AMBER's own H(z),
+# E(z) = sqrt(orad (1+z)^4 + om (1+z)^3 + ol). These numbers are scripts/amber/make_amber_input.py's 'planck18'
+# preset (the one the production runs use); scripts/01a_stitch_lightcones_amber.py refuses to run if a run's
+# amber_run.json disagrees with them. Against the old config value (FlatLambdaCDM H0 67.66, Om0 0.30964) this moves
+# chi by -0.18% at z = 4.5 .. -0.23% at z = 18 (against astropy Planck18 it is +1e-6).
+# For another preset (e.g. chen2022) replace the numbers with that run's amber_params.
 cosmology:
-  use: custom
-  H0: 67.66
-  Om0: 0.30964144154550644
+  use: amber
+  amber:
+    om: 0.3110747613306647
+    ol: 0.6888463055445441
+    ob: 0.04897
+    orad: 7.893312479126026e-05
+    h: 0.6766
 
 snr:
   f_sky: 0.024

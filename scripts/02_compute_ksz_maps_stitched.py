@@ -98,12 +98,20 @@ for seed, d in stitched.items():
     pos_axis = d["pos_axis"]
     xH_box   = d["xH_box"]
     density  = d["density"]
-    vz       = d["velocity_z"]
+    # v2 AMBER stitching stores q_z = x_HII * mom_los [cm/s] (no v = mom/rho); the 21cmFAST path and v1 AMBER
+    # store velocity_z. Same integral either way: (1+delta) x_HII v  ==  x_HII * mom.
+    use_q    = "q_z" in d.files
+    # n_e0 of the run itself when the stitcher recorded one (AMBER v2: from amber_run.json), else the repo's
+    NE0_seed = NE0
+    if "ne0_cgs" in d.files and np.isfinite(float(d["ne0_cgs"])):
+        NE0_seed = float(d["ne0_cgs"])
+        print(f"  n_e0 = {NE0_seed:.6e} cm^-3 from the run (repo ne0_cgs() = {NE0:.6e}, rel {NE0_seed / NE0 - 1:+.1e})")
+    vz       = d["q_z"] if use_q else d["velocity_z"]
 
     x_e = 1.0 - xH_box.mean(axis=(0, 1))   # global (volume-averaged) x_e(z_arr)
 
     tau0 = analytic_tau_below(float(z_arr.min()))
-    z_mid, ds, dtau, tau = compute_tau(x_e, z_arr, pos_axis, ne0=NE0, tau0=tau0)
+    z_mid, ds, dtau, tau = compute_tau(x_e, z_arr, pos_axis, ne0=NE0_seed, tau0=tau0)
     tau_at_lc, visibility, visibility3D = compute_visibility(tau, z_arr, z_mid)
     patchy_mask, patchy_mask_3D = compute_patchy_mask(x_e)
 
@@ -121,14 +129,18 @@ for seed, d in stitched.items():
               f"(RMS={np.sqrt(np.mean(kSZ_maps[seed]**2)):.4e})")
         continue
 
-    density_1plus = 1.0 + density
-    x_HII_field   = 1.0 - xH_box
+    if use_q:
+        density_1plus, x_HII_field = 1.0, 1.0       # q_z already contains x_HII (1+delta) v
+        print("  kSZ integrand: q_z = x_HII * mom_los (stitcher v2, no division by rho)")
+    else:
+        density_1plus = 1.0 + density
+        x_HII_field   = 1.0 - xH_box
     v_los_Mpc_s   = vz / MPC_CM
 
     kSZ_map = compute_ksz_map(
         density_1plus, x_HII_field, v_los_Mpc_s,
         red_axis=z_arr, ds=ds, visibility_3D=visibility3D,
-        ne0=NE0, patchy_mask_3D=patchy_mask_3D,
+        ne0=NE0_seed, patchy_mask_3D=patchy_mask_3D,
     )
     np.save(map_path, kSZ_map)
     kSZ_maps[seed] = kSZ_map

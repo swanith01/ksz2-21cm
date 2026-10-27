@@ -25,7 +25,8 @@
 # Other sets, e.g. one history and ten seeds:
 #     sbatch --array=0-9%5 --export=ALL,HISTS="8",SEEDS="1 2 3 4 5 6 7 8 9 10" ksz2-21cm/slurm/amber_production.sbatch
 # Dry run (prints the commands, runs nothing; needs SLURM_ARRAY_TASK_ID):  DRY=1 SLURM_ARRAY_TASK_ID=7 bash <this file>
-# Results: $R/ksz2-21cm-data/amber_q512_h<ZMID>/cache/seed_<N>/ ;  summary:  python ksz2-21cm/scripts/amber/summarize_production.py
+# Results: $R/ksz2-21cm-data/v2/amber_q512_h<ZMID>/cache/seed_<N>/ (VARIANT=v2 default; stitcher v2, see 01a) ;
+# summary:  python ksz2-21cm/scripts/amber/summarize_production.py --data-root $R/ksz2-21cm-data/v2
 # =============================================================================
 set -o pipefail
 R=${R:-$HOME/rds/rds-dirac-dp145-uYnnMXSp128/dc-upad3}
@@ -38,8 +39,12 @@ SEED=${SEED_A[$((TID % NS))]}
 if [ -z "$H" ] || [ -z "$SEED" ]; then echo "task $TID is outside HISTS x SEEDS (${#HIST_A[@]} x $NS)"; exit 2; fi
 ZDEL=${ZDEL:-4}; ZASY=${ZASY:-3}; L=${L:-512}; N=${N:-256}
 TAG=h${H}
-RUN=$R/amber_runs/prod/$TAG/seed_$SEED
-DATA=$R/ksz2-21cm-data/amber_q512_$TAG
+# VARIANT keeps the stitcher-v2 products apart from the Oct 21-23 (v1) ones: $R/ksz2-21cm-data/<VARIANT>/amber_q512_h<ZMID>
+# (plot scripts: --data-root $R/ksz2-21cm-data/<VARIANT>). The raw dumps of the old runs were deleted after stitching, so
+# v2 re-runs AMBER (about 1 min per run) in its own run directories.
+VARIANT=${VARIANT:-v2}
+RUN=$R/amber_runs/prod_$VARIANT/$TAG/seed_$SEED
+DATA=$R/ksz2-21cm-data/$VARIANT/amber_q512_$TAG
 CFG=$R/ksz2-21cm-data/configs/amber_q512_${TAG}_s${SEED}.yaml
 NPZ=$DATA/cache/seed_$SEED/stitched_lightcone_seed$SEED.npz
 AMBER_X=${AMBER_X:-$R/amber/src/amber.x}

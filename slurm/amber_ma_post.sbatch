@@ -23,7 +23,8 @@ read -r -a SEED_A <<< "${SEEDS:-1 2 3 4 5}"
 TID=${SLURM_ARRAY_TASK_ID:?submit with sbatch}
 H=${HIST_A[$TID]}
 [ -n "$H" ] || { echo "task $TID outside HISTS (${#HIST_A[@]})"; exit 2; }
-DATA=$R/ksz2-21cm-data/amber_q512_h$H
+VARIANT=${VARIANT:-v2}      # as amber_production.sbatch: v2 = stitcher-v2 products under $R/ksz2-21cm-data/v2/
+DATA=$R/ksz2-21cm-data/$VARIANT/amber_q512_h$H
 CFG=$R/ksz2-21cm-data/configs/amber_q512_h${H}_all.yaml
 run() { if [ -n "$DRY" ]; then echo "[dry] $*"; else "$@"; fi; }
 echo "task $TID  history z_mid=$H  seeds ${SEED_A[*]}  node $(hostname)  $(date)"
