@@ -12,6 +12,10 @@
 #    kSZ just beyond each slab edge and biases low -- removed 2026-10-26.)
 #   maeq8    : Ma+18 eq 8 Limber for LINEAR kSZ x 21cm, P_{delta T21} measured from the box
 #   maeq8_lin: the same with Ma's linearised T21 = T0[(1-x_e) delta - x_e delta_x]
+#   lin_full : linear kSZ x 21cm with NO eq-8 approximation: the box's full momentum q = (1+delta) x_e v_z/c
+#              crossed with T21 at every LOS separation (los_lag_cross), summed over the real kSZ weights
+#              and 21cm window (no Limber, no linear velocity, no linearised T21)
+#   x21sq_full: kSZ (NOT squared) x 21cm^2 the same way -- a NULL TEST (odd in the velocity, so zero on average)
 #   maeq8_vcal: maeq8 rescaled by the velocity normalisation measured from each box (velocity check:
 #              r = P(v_z, v_lin)/P(v_lin, v_lin) at k < 0.1/Mpc, printed per snapshot; +1 = linear theory)
 #
@@ -140,7 +144,9 @@ for z in snaps:
     kap = cd.limber_kernels(theta, tb, binner, cell, k_par_min, k_hp)
     a_s, H_s, f_s, _ = cd.background([z])
     vchk = cd.velocity_check(vz, delta, BOX_LEN, float(a_s[0] * H_s[0] * f_s[0]) * MPC_CM, k_edges3)
-    META.append({"z": z, "x_e": xe, "T0": T0, "Tb_mean": float(tb.mean()),
+    G_lin = cd.los_lag_cross(theta, tb, binner)                                    # full-field, non-Limber
+    G_x21sq = cd.los_lag_cross(theta, cd.kpar_filter_los(tb, cell, k_par_min) ** 2, binner)
+    META.append({"z": z, "x_e": xe, "T0": T0, "Tb_mean": float(tb.mean()), "G_lin": G_lin, "G_x21sq": G_x21sq,
                  "P_dT": P_dT, "P_dd": P_dd, "P_ddx": P_ddx,
                  "kappa_zhou": kap["zhou"], "kappa_masq": kap["masq"],
                  "v_r": vchk["r"], "v_amp": vchk["amp"], "v_r_lin": vchk["r_lin"], "v_amp_lin": vchk["amp_lin"]})
@@ -207,6 +213,7 @@ for z0 in z0_list:
             "lin_maeq8": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel], P_at_pixels("P_dT", z_arr[ip])),
             "lin_maeq8_lin": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel], P_at_pixels("P_dT_lin", z_arr[ip])),
             # eq 8 with the velocity normalisation MEASURED from the box (r per snapshot, interpolated in z)
+            "lin_full": cd.lag_prediction(lambda j: META[assign[j]]["G_lin"], W, ip, wins[v][sel], HII_DIM),
             "lin_maeq8_vcal": cd.maeq8_prediction(k_c, psi[ip], wins[v][sel],
                                                   P_at_pixels("P_dT", z_arr[ip]) * np.interp(z_arr[ip], snap_z, vr_snap)[:, None]),
         }
@@ -215,6 +222,7 @@ for z0 in z0_list:
         "z0": float(z0), "chi_z0": chi_z0, "ell": k_c * chi_z0, "k_centers": k_c,
         "x_e_z0": float(np.interp(z0, snap_z, xe_snap)),
         "zhou": {"limber": lim["zhou"]},
+        "x21sq": {"full": cd.lag_prediction(lambda j: META[assign[j]]["G_x21sq"], W, idx, wins["slab"], HII_DIM)},
         "variants": variants,
         "groups": [(float(snap_z[si]), int(len(g))) for si, g in groups], "n_chunk": int(len(idx)),
     }
@@ -228,6 +236,7 @@ out = {
              "P_dd": np.array([m["P_dd"] for m in META]), "P_ddx": np.array([m["P_ddx"] for m in META]),
              "kappa_zhou": np.array([m["kappa_zhou"] for m in META]),
              "kappa_masq": np.array([m["kappa_masq"] for m in META]),
+             "G_lin": np.array([m["G_lin"] for m in META]), "G_x21sq": np.array([m["G_x21sq"] for m in META]),
              "v_r": np.array([m["v_r"] for m in META]), "v_amp": np.array([m["v_amp"] for m in META]),
              "v_r_lin": vr_snap, "v_amp_lin": np.array([m["v_amp_lin"] for m in META]),
              "k_centers": k_c, "z_arr": z_arr[use], "W": W[use], "psi_par": psi[use], "x_e_pix": xe_pix[use],

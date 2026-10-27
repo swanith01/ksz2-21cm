@@ -294,6 +294,54 @@ def velocity_check(vz, delta, box_len, aHf_cm, k_edges, k_max=0.1):
             "amp_lin": float(np.median(amp[sel])) if sel.any() else np.nan}
 
 
+def los_lag_cross(a, b, binner):
+    """
+    Full-field, non-Limber ingredient for projected cross spectra (no approximation besides using one
+    snapshot box per redshift): for two (N, N, n) boxes a, b with the LOS along axis 2,
+        G[d, kbin] = ring mean over |k_perp| of  Re < F2[a(z + d)] conj F2[b(z)] >_z  * pix_area / N^2
+    for every LOS lag d = 0..n-1 in cells (periodic: d > n/2 are negative lags), in exactly the map
+    convention of Binner.cross. A projection pair  A = sum_i W_i a_i,  B = sum_j w_j b_j  then has
+        C_AB(k) = sum_{i,j} W_i w_j G[(i - j) mod n, k]
+    -- every pair of LOS pixels, at its real separation, with the box's own nonlinear fields.
+    """
+    n = a.shape[2]
+    Fa = np.fft.fft2(np.asarray(a, np.float64) - np.mean(a), axes=(0, 1))
+    Fa = np.fft.fft(Fa, axis=2)
+    Fb = np.fft.fft2(np.asarray(b, np.float64) - np.mean(b), axes=(0, 1))
+    Fb = np.fft.fft(Fb, axis=2)
+    X = np.fft.ifft(Fa * np.conj(Fb), axis=2) / n          # mean over z of F2a(z+d) conj F2b(z)
+    del Fa, Fb
+    X = np.fft.fftshift(np.real(X), axes=(0, 1)) * binner.pix_area / binner.N ** 2
+    G = np.full((n, binner.nb), np.nan)
+    ok = binner.counts > 0
+    flat_b = binner.bidx[binner.valid]
+    for d in range(n):
+        s = np.bincount(flat_b, weights=X[:, :, d][binner.valid], minlength=binner.nb)
+        G[d, ok] = s[ok] / binner.counts[ok]
+    return G
+
+
+def lag_prediction(G_by_pix, W, w_idx, w_val, n_box):
+    """
+    C(k) = sum_j w_j sum_i W_i G_{s(j)}[(i - j) mod n_box, k]  over kSZ pixels i within +-(n_box/2 - 1)
+    cells of each 21cm pixel j (beyond half the box the periodic lag is ambiguous).
+    G_by_pix : callable j -> (n_box, nb) lag table of the snapshot assigned to 21cm pixel j
+    W        : (n_pix_total,) kSZ weights on the whole LOS grid
+    w_idx, w_val : 21cm window pixel indices and weights
+    """
+    h = n_box // 2 - 1
+    out = None
+    for j, wj in zip(w_idx, w_val):
+        if wj == 0:
+            continue
+        lo, hi = max(0, j - h), min(len(W), j + h + 1)
+        i = np.arange(lo, hi)
+        G = G_by_pix(j)[(i - j) % n_box]                      # (len(i), nb)
+        c = wj * np.tensordot(W[lo:hi], G, axes=([0], [0]))
+        out = c if out is None else out + c
+    return out
+
+
 def interp_P(k_edges, P, k):
     """Interpolate a binned P(k) (bin centres, log k) at k; NaN outside the measured range."""
     kc = np.sqrt(k_edges[:-1] * k_edges[1:])

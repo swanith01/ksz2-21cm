@@ -132,3 +132,20 @@ def test_velocity_check_sign_and_amplitude():
         chk = cd.velocity_check(fac * v, d, L, aHf, edges)
         assert abs(chk["r_lin"] - fac) < 1e-6, (fac, chk["r_lin"])
     assert abs(cd.velocity_check(-v, d, L, aHf, edges)["amp_lin"] - 1.0) < 1e-6
+
+
+def test_lag_cross_exact_identity():
+    """sum_ij W_i w_j G[i-j] == the map cross power averaged over all cyclic LOS shifts of the box."""
+    rng = np.random.default_rng(8)
+    N, n, cell = 16, 24, 2.0
+    a = rng.standard_normal((N, N, n))
+    b = 0.6 * a + rng.standard_normal((N, N, n))
+    b = np.roll(b, 2, axis=2)                       # correlation at a nonzero lag
+    bn = cd.Binner(N, cell, np.logspace(np.log10(2 * np.pi / (N * cell)), np.log10(np.pi / cell * 1.42), 6))
+    G = cd.los_lag_cross(a, b, bn)
+    W = np.zeros(n); W[3:9] = rng.uniform(0.5, 1.5, 6)        # spans < n/2, so no lag is truncated
+    w = np.zeros(n); w[5:8] = [0.2, 0.5, 0.3]
+    pred = cd.lag_prediction(lambda j: G, W, np.arange(n), w, n)
+    meas = np.mean([bn.cross(bn.fft(np.tensordot(np.roll(a, -s, axis=2), W, axes=([2], [0]))),
+                             bn.fft(np.tensordot(np.roll(b, -s, axis=2), w, axes=([2], [0])))) for s in range(n)], axis=0)
+    assert np.allclose(pred, meas, rtol=1e-10, atol=1e-12, equal_nan=True)

@@ -6,7 +6,12 @@
 # the SAME seeds, one figure per statistic, D_ell vs chunk centre z0 at fixed ell:
 #   coeval_vs_lc_zhou.{png,pdf}    kSZ^2 x 21cm^2     lightcone | Limber (bispectrum)
 #   coeval_vs_lc_ma_sq.{png,pdf}   kSZ^2 x 21cm       lightcone | Limber (bispectrum)
-#   coeval_vs_lc_ma_lin.{png,pdf}  kSZ x 21cm         lightcone | Ma eq 8 (measured P_dT) | (linearised T21) | (box-measured velocity)
+#   coeval_vs_lc_ma_lin.{png,pdf}  kSZ x 21cm         lightcone | coeval FULL fields (no eq-8 approximation) |
+#                                                     Ma eq 8 (measured P_dT) | (linearised T21) | (box-measured velocity)
+#   coeval_vs_lc_x21sq.{png,pdf}   kSZ x 21cm^2       lightcone (scripts/18b) | coeval full fields -- NULL TEST (zero on average)
+# Benchmarks on a right-hand axis (zeros aligned, shape/sign only; --no-bench to drop): Zhou+25 Fig. 5 on the
+# Zhou plot (vs z: their history is close to our fiducial); Ma+18 Fig. 3 on the Ma plots, placed at the SAME
+# ionized fraction (Ma's z -> Ma's x_e -> our z0 with that x_e), since Ma's reionization is much earlier.
 # Bands / bars = s.e.m. over seeds. Units as 06 / 08 with --chi-norm z0 (divided by chi(z0)^2).
 # Also: coeval_vs_lc_data.npz (every curve) and coeval_vs_lc_summary.csv (per estimator and ell:
 # least-squares amplitude coeval/lightcone over z0, and the correlation of the two z0 curves).
@@ -37,6 +42,7 @@ ap.add_argument("--seeds", type=int, nargs="+", default=None)
 ap.add_argument("--variant", default="slice", choices=["slice", "narrow", "slab"], help="21cm map for the Ma statistics")
 ap.add_argument("--ma-tag", default="_dz2_nd0.2_lmin100_z5.5-15-0.25", help="04b cache tag")
 ap.add_argument("--out-dir", default=None, help="default <plot_dir>/coeval_direct")
+ap.add_argument("--no-bench", action="store_true", help="no Zhou+25 / Ma+18 benchmark curves")
 args = ap.parse_args()
 
 cfg = load_config(args.config)
@@ -47,15 +53,19 @@ seeds = args.seeds or cfg["simulation"]["random_seeds"]
 
 U_ZHOU = (T_CMB_K * 1e6) ** 2 * 1e6          # (dT/T)^2 mK^2 -> muK^4
 U_LIN, U_SQ = T_CMB_K * 1e6, (T_CMB_K * 1e6) ** 2   # -> mK muK, mK muK^2 (as 08)
+U_X = T_CMB_K * 1e6                                    # kSZ dT/T x mK^2 -> mK^2 muK
 STATS = {
     "zhou": dict(ells=[400, 800, 1600], unit=U_ZHOU, ylab=r"$D_\ell/\chi^2$ [$\mu$K$^4$/Mpc$^2$]",
                  title=r"kSZ$^2\times$21cm$^2$ (Zhou)", est=[("limber", "coeval Limber (bispectrum)")]),
     "ma_sq": dict(ells=[500, 1000, 3000], unit=U_SQ, ylab=r"$D_\ell/\chi^2$ [mK $\mu$K$^2$/Mpc$^2$]",
                   title=r"kSZ$^2\times$21cm (Ma)", est=[("sq_limber", "coeval Limber (bispectrum)")]),
     "ma_lin": dict(ells=[100, 500], unit=U_LIN, ylab=r"$D_\ell/\chi^2$ [mK $\mu$K/Mpc$^2$]",
-                   title=r"kSZ$\times$21cm (Ma)", est=[("lin_maeq8", r"Ma eq 8, measured $P_{\delta T}$"),
+                   title=r"kSZ$\times$21cm (Ma)", est=[("lin_full", "coeval full fields (no eq 8 approx.)"),
+                                                       ("lin_maeq8", r"Ma eq 8, measured $P_{\delta T}$"),
                                                        ("lin_maeq8_lin", r"Ma eq 8, linearised $T_{21}$"),
                                                        ("lin_maeq8_vcal", r"Ma eq 8, velocity from box")]),
+    "x21sq": dict(ells=[400, 800, 1600], unit=U_X, ylab=r"$D_\ell/\chi^2$ [mK$^2$ $\mu$K/Mpc$^2$]",
+                  title=r"kSZ$\times$21cm$^2$ (null test)", est=[("full", "coeval full fields")]),
 }
 
 
@@ -75,11 +85,13 @@ for s in seeds:
     p_co = os.path.join(cache_dir, f"seed_{s}", f"coeval_direct_seed{s}.npy")
     p_zh = os.path.join(cache_dir, f"seed_{s}", f"cross_corr_sq_stitched_seed{s}.npy")
     p_ma = os.path.join(cache_dir, f"seed_{s}", f"cross_corr_ma_stitched_seed{s}{args.ma_tag}.npy")
+    p_x = os.path.join(cache_dir, f"seed_{s}", f"cross_corr_ksz_x_21sq_stitched_seed{s}.npy")
     if not os.path.exists(p_co):
         continue
     co = np.load(p_co, allow_pickle=True).item()["results"]
     zh = np.load(p_zh, allow_pickle=True).item() if os.path.exists(p_zh) else {}
     ma = np.load(p_ma, allow_pickle=True).item() if os.path.exists(p_ma) else {}
+    ma["__x21sq"] = np.load(p_x, allow_pickle=True).item() if os.path.exists(p_x) else {}
     zs = sorted(co)
     z0s = zs if z0s is None else [z for z in z0s if z in zs]
     used.append((s, co, zh, ma))
@@ -96,6 +108,9 @@ def lookup(src, stat, s_co, s_zh, s_ma, z):
         if stat == "zhou":
             d = s_zh.get(z)
             return (d["ell"], d["C_cross"]) if d else None
+        if stat == "x21sq":
+            d = s_ma["__x21sq"].get(z)
+            return (d["ell"], d["C"]) if d else None
         d = s_ma.get(z)
         if not d:
             return None
@@ -103,7 +118,10 @@ def lookup(src, stat, s_co, s_zh, s_ma, z):
         return d["ell"], d["variants"][args.variant][key]
     if stat == "zhou":
         return r["ell"], r["zhou"][src]
-    return r["ell"], r["variants"][args.variant][src]
+    if stat == "x21sq":
+        return (r["ell"], r["x21sq"][src]) if "x21sq" in r else None
+    v = r["variants"][args.variant]
+    return (r["ell"], v[src]) if src in v else None
 
 
 curves = {}
@@ -160,7 +178,28 @@ plt.rcParams.update({"font.size": 12, "axes.labelsize": 13, "legend.fontsize": 1
 z0a = np.array(z0s)
 xe_a = np.array([np.mean(xe_z0[z]) for z in z0s])
 STYLE = {"lightcone": dict(color="#0072B2"), 1: dict(color="#D55E00", marker="o"), 2: dict(color="#009E73", marker="s"),
-         3: dict(color="#CC79A7", marker="^")}
+         3: dict(color="#CC79A7", marker="^"), 4: dict(color="#E69F00", marker="v")}
+BENCH = {}
+if not args.no_bench:
+    from ksz2_21cm.plotting.zhou25_data import ZHOU_FIG5
+    from ksz2_21cm.plotting.ma18_data import MA18, ma18_xe_of_z
+    o = np.argsort(xe_a)
+
+    def ma_on_our_z(arr):
+        """Ma+18 points moved to the z0 where OUR x_e equals Ma's x_e at their z (NaN outside our range)."""
+        xe_m = ma18_xe_of_z(arr[:, 0])
+        zz = np.interp(xe_m, xe_a[o], z0a[o], left=np.nan, right=np.nan)
+        return np.column_stack([zz, arr[:, 1], arr[:, 2]])
+
+    for L in STATS["zhou"]["ells"]:
+        if int(L) in ZHOU_FIG5:
+            z5 = np.asarray(ZHOU_FIG5[int(L)], float)
+            BENCH[("zhou", L)] = (np.column_stack([z5[:, 0], z5[:, 1], np.zeros(len(z5))]), r"Zhou+25 Fig. 5 [$\mu$K$^4$]")
+    for stat, key in (("ma_lin", "kSZ"), ("ma_sq", "kSZ2")):
+        for L in STATS[stat]["ells"]:
+            k = f"F3_{key}_l{L}"
+            if k in MA18:
+                BENCH[(stat, L)] = (ma_on_our_z(np.asarray(MA18[k], float)), "Ma+18 Fig. 3 at the same $x_e$")
 
 for stat, spec in STATS.items():
     ells = spec["ells"]
@@ -173,14 +212,34 @@ for stat, spec in STATS.items():
         for n, (src, lab) in enumerate(spec["est"], start=1):
             m2, e2 = mean_sem(curves[(stat, src)])
             ax.errorbar(z0a + 0.04 * (n - 2), m2[:, k], yerr=e2[:, k], ls="--", lw=1.2, ms=4, capsize=2, label=lab, **STYLE[n])
+        b = BENCH.get((stat, L))
+        if b is not None:
+            pts, blab = b
+            ok = np.isfinite(pts[:, 0])
+            if ok.sum() >= 2:
+                tw = ax.twinx()
+                if stat == "zhou":
+                    tw.plot(pts[ok, 0], pts[ok, 1], "--", color="k", lw=1.3, label=blab)
+                else:
+                    tw.errorbar(pts[ok, 0], pts[ok, 1], pts[ok, 2], fmt="s", ms=3, mfc="none", color="0.35",
+                                elinewidth=0.7, label=blab)
+                tw.set_ylabel(("Zhou+25" if stat == "zhou" else "Ma+18") + " (right axis)", fontsize=9)
+                ax.set_zorder(tw.get_zorder() + 1)          # our curves and legend above the benchmark
+                ax.patch.set_visible(False)
+                yr = 1.1 * np.nanmax(np.abs(pts[ok, 1]) + pts[ok, 2])
+                tw.set_ylim(-yr, yr)
+                lims = [ax.get_ylim()]
+                yl = max(abs(lims[0][0]), abs(lims[0][1]))
+                ax.set_ylim(-yl, yl)
+                if k == 0:
+                    tw.legend(loc="lower left", frameon=False, fontsize=9)
         ax.axhline(0, color="gray", lw=0.8)
         ax.set_ylabel(spec["ylab"], fontsize=11)
         ax.text(0.02, 0.92, rf"$\ell={L}$", transform=ax.transAxes, va="top")
         if k == 0:
-            ax.legend(loc="best", frameon=False)
+            ax.legend(loc="best", frameon=True, framealpha=0.85, fontsize=9)
     axes[-1].set_xlabel(r"chunk centre $z_0$")
-    for ax in axes:
-        ax.invert_xaxis()
+    axes[0].invert_xaxis()          # sharex: inverting once inverts every panel (twice would undo it)
     top = axes[0].twiny()
     top.set_xlim(axes[0].get_xlim())
     tz = [z for z in z0s if abs(z - round(z)) < 1e-9]

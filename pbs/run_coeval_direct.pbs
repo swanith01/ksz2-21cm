@@ -6,7 +6,8 @@
 #PBS -o logs/coeval_direct.out
 #PBS -e logs/coeval_direct.err
 
-# kSZ x 21cm straight from the coeval boxes of ONE seed (scripts/18), then the comparison
+# kSZ x 21cm straight from the coeval boxes of ONE seed (scripts/18), the lightcone kSZ x 21cm^2 null
+# test for that seed (scripts/18b, reads the stitched lightcone), then the comparison
 # plots for every seed finished so far (scripts/19, light).
 # 21cmFAST regenerates the seed's boxes up to z = 13 (same seed and parameters as the
 # stitched lightcone, so the same realisation). Its .h5 cache (~20 GB at 256^3) lives in
@@ -29,5 +30,6 @@ LOG=logs/coeval_direct_seed${SEED}_$(date +%Y%m%d_%H%M).log
 echo "seed $SEED on $(hostname), log $LOG"
 
 python scripts/18_coeval_direct.py --config $CFG --seed $SEED 2>&1 | tee $LOG
+python scripts/18b_lightcone_ksz_x_21sq.py --config $CFG --seeds $SEED 2>&1 | tee -a $LOG
 python scripts/19_plot_coeval_direct.py --config $CFG 2>&1 | tee -a $LOG
 echo "=== DONE seed $SEED ===" | tee -a $LOG
