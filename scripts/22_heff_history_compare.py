@@ -13,8 +13,11 @@
 #                                    right: the reionization histories with the patchy-window milestones
 #                                    z_start (x_e = 1e-4), z50, z_end (x_e = 1 - 1e-4) marked
 #     heff_<stat>_shifted.{png,pdf}  the same against z0 - z50 of each history
+#     heff_<stat>_xe.{png,pdf}       the same against the volume-weighted ionized fraction x_HII at the chunk centre
+#                                    (history mean), 0 -> 1 left to right: do the humps line up in x_HII?
 # plus heff_history_data.npz and a printed table (milestones per history; peak / trough / zero
-# crossings of every curve). Units as 06 / 08 with --chi-norm z0 (D divided by chi(z0)^2).
+# crossings of every curve; and the peak location of every curve in z0, z0 - z50 and x_HII with a
+# bootstrap-over-seeds uncertainty, --bootstrap). Units as 06 / 08 with --chi-norm z0 (D divided by chi(z0)^2).
 #
 #   python scripts/22_heff_history_compare.py --data-root $R/ksz2-21cm-data
 # =============================================================================
@@ -41,6 +44,7 @@ ap.add_argument("--pattern", default="heff_*", help="history folders under --dat
 ap.add_argument("--ma-tag", default="_dz2_nd0.2_lmin100_z4.5-13.5-0.25", help="04b cache tag (heff_post.sbatch's)")
 ap.add_argument("--variant", default="slice", choices=["slice", "narrow", "slab"], help="21cm map for the Ma statistics")
 ap.add_argument("--out-dir", default=None, help="default <data-root>/heff_history_compare")
+ap.add_argument("--bootstrap", type=int, default=300, help="seed resamples for the peak-location uncertainty (0 = off)")
 a = ap.parse_args()
 
 out_dir = a.out_dir or os.path.join(a.data_root, "heff_history_compare")
@@ -150,6 +154,46 @@ for stat, sp in STATS.items():
             print(f"   HII_EFF={h['heff']:5g} (z50={h['ms']['z50']:.2f}): peak z0={zk[np.argmax(mk)]:.2f} ({mk.max():.3g}), "
                   f"trough z0={zk[np.argmin(mk)]:.2f} ({mk.min():.3g}), zero crossings {', '.join(f'{c:.2f}' for c in zc) or '-'}")
 
+def xhii_at(h, z0):
+    """Volume-weighted x_HII (history mean over seeds) at redshift(s) z0."""
+    o = np.argsort(h["z"])
+    return np.interp(z0, h["z"][o], h["xe"][o])
+
+
+def peak_loc(T, xs, nboot, rng):
+    """Location (in coordinate xs) of the maximum of the seed-mean curve, with a bootstrap-over-seeds std."""
+    m = np.nanmean(T, axis=0)
+    ok = np.isfinite(m)
+    if ok.sum() < 3:
+        return np.nan, np.nan
+    base = float(xs[ok][np.argmax(m[ok])])
+    boots = []
+    for _ in range(nboot):
+        mb = np.nanmean(T[rng.integers(0, T.shape[0], T.shape[0])], axis=0)
+        okb = np.isfinite(mb)
+        if okb.sum() >= 3:
+            boots.append(float(xs[okb][np.argmax(mb[okb])]))
+    return base, (float(np.std(boots)) if len(boots) > 1 else np.nan)
+
+
+print("\nPEAK LOCATION of the seed-mean curve (global maximum), +- bootstrap over seeds:")
+print("   if the humps follow the ionized fraction, the x_HII column should agree between histories")
+rng = np.random.default_rng(0)
+for stat, sp in STATS.items():
+    for L in sp["ells"]:
+        print(f"{stat} ell={L}:")
+        for h in H:
+            z0 = h["z0"][stat]
+            if len(z0) < 3:
+                continue
+            T = h["D"][(stat, L)]
+            nb = a.bootstrap if T.shape[0] > 1 else 0
+            pz, ez = peak_loc(T, z0, nb, rng)
+            pd_, ed = peak_loc(T, z0 - h["ms"]["z50"], nb, rng)
+            px, ex = peak_loc(T, xhii_at(h, z0), nb, rng)
+            print(f"   HII_EFF={h['heff']:5g} (z50={h['ms']['z50']:.2f}, N={T.shape[0]:2d}): z0 = {pz:5.2f} +- {ez:4.2f}   "
+                  f"z0-z50 = {pd_:+5.2f} +- {ed:4.2f}   x_HII = {px:5.3f} +- {ex:5.3f}")
+
 np.savez(os.path.join(out_dir, "heff_history_data.npz"), heff=np.array([h["heff"] for h in H]),
          **{f"xe_heff{h['heff']:g}": np.vstack([h["z"], h["xe"]]) for h in H},
          **{f"milestones_heff{h['heff']:g}": np.array([h["ms"][k] for k in ("z_start", "z10", "z50", "z90", "z_end")]) for h in H},
@@ -182,7 +226,8 @@ def hist_panel(ax):
 
 
 for stat, sp in STATS.items():
-    for shifted in (False, True):
+    for mode in ("z0", "shifted", "xe"):
+        shifted = mode == "shifted"
         n = len(sp["ells"])
         fig = plt.figure(figsize=(14, 3.1 * n + 0.6))
         gs = fig.add_gridspec(n, 2, width_ratios=[1.7, 1])
@@ -192,24 +237,34 @@ for stat, sp in STATS.items():
         for ax, L in zip(axes, sp["ells"]):
             for h, c in zip(H, cols):
                 m, e = mean_sem(h["D"][(stat, L)])
-                x = h["z0"][stat] - (h["ms"]["z50"] if shifted else 0.0)
+                if mode == "xe":
+                    x = xhii_at(h, h["z0"][stat])
+                    o = np.argsort(x)                       # x_HII rises as z0 falls: draw in x order
+                    x, m, e = x[o], m[o], e[o]
+                else:
+                    x = h["z0"][stat] - (h["ms"]["z50"] if shifted else 0.0)
                 ax.fill_between(x, m - e, m + e, color=c, alpha=0.2, lw=0)
                 ax.plot(x, m, "-o", color=c, ms=3.5, lw=1.6,
                         label=rf"HII_EFF={h['heff']:g} ($z_{{50}}$={h['ms']['z50']:.2f}, N={len(h['seeds'])})")
             ax.axhline(0, color="gray", lw=0.8)
             if shifted:
                 ax.axvline(0, color="gray", lw=0.8, ls=":")
+            if mode == "xe":
+                ax.axvline(0.5, color="gray", lw=0.8, ls=":")
             ax.text(0.02, 0.92, rf"$\ell={L}$", transform=ax.transAxes, va="top")
             ax.set_ylabel(r"$D_\ell/\chi^2$ " + sp["ylab"], fontsize=11)
         axes[0].legend(loc="best", frameon=True, framealpha=0.85, fontsize=9)
-        axes[-1].set_xlabel(r"$z_0 - z_{50}$ of that history" if shifted else r"chunk centre $z_0$")
-        if not shifted:
+        axes[-1].set_xlabel({"z0": r"chunk centre $z_0$", "shifted": r"$z_0 - z_{50}$ of that history",
+                             "xe": r"$\bar{x}_{\rm HII}$ at the chunk centre $z_0$ (volume-weighted, history mean)"}[mode])
+        if mode == "z0":
             axes[0].invert_xaxis()
+        elif mode == "xe":
+            axes[0].set_xlim(0.0, 1.0)
         hist_panel(fig.add_subplot(gs[:, 1]))
         fig.suptitle(sp["title"] + " for different reionization histories (21cmFAST, HII_EFF scan)" +
                      ("" if stat == "zhou" else f", 21cm map = '{a.variant}'"), fontsize=13)
         fig.tight_layout()
-        stem = f"heff_{stat}" + ("_shifted" if shifted else "")
+        stem = f"heff_{stat}" + {"z0": "", "shifted": "_shifted", "xe": "_xe"}[mode]
         for ext in ("png", "pdf"):
             fig.savefig(os.path.join(out_dir, f"{stem}.{ext}"), dpi=150, bbox_inches="tight")
         plt.close(fig)
