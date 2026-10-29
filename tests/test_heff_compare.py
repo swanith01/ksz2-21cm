@@ -80,3 +80,34 @@ def test_papers_overlay_runs():
         out = os.path.join(d, "heff_history_compare")
         assert os.path.exists(os.path.join(out, "heff_zhou_xe_papers.png"))
         assert os.path.exists(os.path.join(out, "heff_zhou_xe.png"))   # the plain plots are still written
+
+
+def test_zhou_fig6_digitisation_sane():
+    """The Fig. 6 digitisation: all 4 panels x 3 scenarios x 3 ells present; HERA Fiducial ell=400 peak matches Fig. 5's
+    digitised peak (81.9 muK^4 at z0 ~ 9.2); Late < Fiducial at the peak for SKA at every ell (the paper's own statement)."""
+    from ksz2_21cm.plotting.zhou25_fig6 import ZHOU_FIG6
+    from ksz2_21cm.plotting.zhou25_data import ZHOU_FIG5
+    assert set(ZHOU_FIG6) == {("HERA", "z"), ("HERA", "xhii"), ("SKA", "z"), ("SKA", "xhii")}
+    for k, d in ZHOU_FIG6.items():
+        for sc in ("Fiducial", "Late", "Short"):
+            assert set(d[sc]) == {400, 800, 1600}, (k, sc)
+    f = ZHOU_FIG6[("HERA", "z")]["Fiducial"][400]
+    i = np.argmax(f[:, 1])
+    j = np.argmax(ZHOU_FIG5[400][:, 1])
+    assert abs(f[i, 1] - ZHOU_FIG5[400][j, 1]) < 2.0 and abs(f[i, 0] - ZHOU_FIG5[400][j, 0]) < 0.15
+    for L in (400, 800, 1600):
+        fid = ZHOU_FIG6[("SKA", "z")]["Fiducial"][L][:, 1].max()
+        assert ZHOU_FIG6[("SKA", "z")]["Late"][L][:, 1].max() < 0.7 * fid
+
+
+def test_papers_overlay_history_panel():
+    """--papers keeps the x_e(z) side panel (with Ma+18 / Zhou+25 histories) and writes the amplitude-trend table."""
+    with tempfile.TemporaryDirectory() as d:
+        _make_root(d)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts/22_heff_history_compare.py"), "--data-root", d,
+                            "--bootstrap", "0", "--papers"], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "AMPLITUDE TREND" in r.stdout and "Late/Fid" in r.stdout
+        from PIL import Image
+        im = Image.open(os.path.join(d, "heff_history_compare", "heff_zhou_xe_papers.png"))
+        assert im.size[0] > 1.25 * im.size[1] * 0.9          # wide figure: the side panel is there

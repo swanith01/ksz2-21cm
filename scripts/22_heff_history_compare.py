@@ -48,7 +48,10 @@ ap.add_argument("--bootstrap", type=int, default=300, help="seed resamples for t
 ap.add_argument("--papers", action="store_true",
                 help="x_HII plots only: overlay the digitised Ma+18 (Fig. 3) / Zhou+25 (Fig. 5) curves on a right-hand axis, "
                      "mapped to x_HII through each paper's OWN history; writes heff_<stat>_xe_papers.{png,pdf}")
-ap.add_argument("--no-history-panel", action="store_true", help="drop the x_e(z) side panel (implied by --papers)")
+ap.add_argument("--zhou-instrument", default="SKA", choices=["SKA", "HERA"],
+                help="Zhou+25 Fig. 6 panel row to overlay for the Zhou statistic (SKA1-Low: noise filter ~ unity, closest to our "
+                     "unfiltered-noise statistic; HERA: strong scale-dependent filter)")
+ap.add_argument("--no-history-panel", action="store_true", help="drop the x_e(z) side panel")
 a = ap.parse_args()
 
 out_dir = a.out_dir or os.path.join(a.data_root, "heff_history_compare")
@@ -204,6 +207,24 @@ np.savez(os.path.join(out_dir, "heff_history_data.npz"), heff=np.array([h["heff"
          **{f"z0_{stat}_heff{h['heff']:g}": h["z0"][stat] for h in H for stat in STATS},
          **{f"D_{stat}_ell{L}_heff{h['heff']:g}": h["D"][(stat, L)] for h in H for stat, sp in STATS.items() for L in sp["ells"]})
 
+if a.papers:
+    # ── amplitude trend: peak of the Zhou statistic relative to the mid history, ours vs Zhou+25 Fig. 6 ──
+    from ksz2_21cm.plotting.zhou25_fig6 import ZHOU_FIG6
+    from ksz2_21cm.plotting.zhou25_history import ZHOU_HISTORY
+    print("\nAMPLITUDE TREND of the Zhou statistic: global maximum of the curve, relative to the middle history")
+    print("  ours  : seed-mean D/chi^2 peak; ratios are  <history> / HII_EFF=%g (z50 = %.2f)" % (H[len(H) // 2]["heff"], H[len(H) // 2]["ms"]["z50"]))
+    for inst in ("SKA", "HERA"):
+        zz50 = {sc: float(np.interp(0.5, ZHOU_HISTORY[sc][::-1, 1], ZHOU_HISTORY[sc][::-1, 0])) for sc in ("Fiducial", "Late", "Short")}
+        print(f"  Zhou+25 {inst}: scenario z50 = " + ", ".join(f"{k} {v:.2f}" for k, v in zz50.items()) + "; ratios are  <scenario> / Fiducial")
+        for L in STATS["zhou"]["ells"]:
+            pk = {sc: float(np.max(ZHOU_FIG6[(inst, "z")][sc][L][:, 1])) for sc in ("Fiducial", "Late", "Short")}
+            print(f"     ell={L:5d}  Late/Fid = {pk['Late'] / pk['Fiducial']:.2f}   Short/Fid = {pk['Short'] / pk['Fiducial']:.2f}   (Fid peak {pk['Fiducial']:.0f} muK^4)")
+    mid = H[len(H) // 2]
+    for L in STATS["zhou"]["ells"]:
+        pks = {h["heff"]: float(np.nanmax(np.nanmean(h["D"][("zhou", L)], axis=0))) for h in H}
+        print(f"  ours ell={L:5d}  " + "   ".join(f"HII_EFF={k:g} ({[h for h in H if h['heff'] == k][0]['ms']['z50']:.2f}) / mid = {v / pks[mid['heff']]:.2f}" for k, v in pks.items()))
+
+
 # ── plots ──
 import matplotlib
 matplotlib.use("Agg")
@@ -214,7 +235,7 @@ plt.rcParams.update({"font.size": 12, "axes.labelsize": 13, "legend.fontsize": 1
 cols = plt.cm.plasma(np.linspace(0.1, 0.8, len(H)))
 
 
-def hist_panel(ax):
+def hist_panel(ax, papers=False):
     for h, c in zip(H, cols):
         ax.plot(h["z"], h["xe"], "-", color=c, lw=1.8)
         for key, lev, mk in (("z_start", XE_START, "v"), ("z50", 0.5, "o"), ("z_end", XE_END, "^")):
@@ -223,6 +244,15 @@ def hist_panel(ax):
                 ax.axvline(h["ms"][key], color=c, lw=0.6, ls=":")
     for lev in (XE_START, 0.5, XE_END):
         ax.axhline(lev, color="gray", lw=0.6, ls=":")
+    if papers:
+        from ksz2_21cm.plotting.ma18_data import MA18_HISTORY
+        from ksz2_21cm.plotting.zhou25_history import ZHOU_HISTORY
+        ax.plot(MA18_HISTORY[:, 0], MA18_HISTORY[:, 1], "s-", color="k", ms=2.5, lw=1.0, mfc="none", label="Ma+18 (Fig. 1)")
+        for sc, ls in (("Fiducial", "-"), ("Late", "--"), ("Short", ":")):
+            zh_ = ZHOU_HISTORY[sc]
+            ax.plot(zh_[:, 0], zh_[:, 1], ls, color="0.25", lw=1.5, label=f"Zhou+25 {sc}")
+        ax.legend(loc="center left", fontsize=8, frameon=True, framealpha=0.85)
+        ax.set_xlim(3.0, 20.5)          # inverted just below: high z on the left
     ax.set_xlabel("z")
     ax.set_ylabel(r"$\bar{x}_e$")
     ax.set_title(r"histories: $\nabla$ $z_{\rm start}$ ($x_e=10^{-4}$), $\circ$ $z_{50}$, $\Delta$ $z_{\rm end}$ ($x_e=1-10^{-4}$)", fontsize=9)
@@ -230,21 +260,23 @@ def hist_panel(ax):
 
 
 def paper_curves(stat, L):
-    """[(x_HII, value, err or None)] of the paper curve for this stat/ell, x_HII from THAT paper's history."""
+    """Digitised paper curves for this stat/ell, as a list of (label, linestyle, x_HII, value, err or None).
+    Zhou: Fig. 6 (Fiducial / Late / Short, the paper's OWN x_HII axis). Ma: Fig. 3 (one history; z -> x_e by Ma's Fig. 1)."""
     from ksz2_21cm.plotting.ma18_data import MA18, ma18_xe_of_z
-    from ksz2_21cm.plotting.zhou25_data import ZHOU_FIG5
-    from ksz2_21cm.plotting.zhou25_history import ZHOU_HISTORY
     if stat == "zhou":
-        if L not in ZHOU_FIG5:
-            return None
-        zf = ZHOU_HISTORY["Fiducial"]
-        s_ = ZHOU_FIG5[L]
-        return np.interp(s_[:, 0], zf[:, 0], zf[:, 1]), s_[:, 1], None
+        from ksz2_21cm.plotting.zhou25_fig6 import ZHOU_FIG6
+        d = ZHOU_FIG6[(a.zhou_instrument, "xhii")]
+        out = []
+        for sc, ls in (("Fiducial", "-"), ("Late", "--"), ("Short", ":")):
+            if L in d[sc]:
+                x_, y_ = d[sc][L][:, 0], d[sc][L][:, 1]
+                out.append((f"Zhou+25 {sc} ({a.zhou_instrument})", ls, x_, y_, None))
+        return out or None
     key = f"F3_{'kSZ' if stat == 'ma_lin' else 'kSZ2'}_l{L}"
     if key not in MA18:
         return None
     s_ = MA18[key]
-    return ma18_xe_of_z(s_[:, 0]), s_[:, 1], s_[:, 2]
+    return [("Ma+18", "s", ma18_xe_of_z(s_[:, 0]), s_[:, 1], s_[:, 2])]
 
 
 def align_zero(ax, tw, lo_hi):
@@ -263,10 +295,11 @@ for stat, sp in STATS.items():
             mode = "xe"
         shifted = mode == "shifted"
         n = len(sp["ells"])
-        no_hist = a.no_history_panel or papers
+        no_hist = a.no_history_panel
         fig = plt.figure(figsize=(10.5 if no_hist else 14, 3.1 * n + 0.6))
         gs = fig.add_gridspec(n, 1) if no_hist else fig.add_gridspec(n, 2, width_ratios=[1.7, 1])
         axes = [fig.add_subplot(gs[i, 0]) for i in range(n)]
+        paper_handles = None
         for ax in axes[1:]:
             ax.sharex(axes[0])
         for ax, L in zip(axes, sp["ells"]):
@@ -288,22 +321,23 @@ for stat, sp in STATS.items():
                 ax.axvline(0.5, color="gray", lw=0.8, ls=":")
             ax.text(0.02, 0.92, rf"$\ell={L}$", transform=ax.transAxes, va="top")
             if papers:
-                pc = paper_curves(stat, L)
-                if pc is not None:
-                    px, py, pe = pc
-                    o = np.argsort(px)
-                    px, py = px[o], py[o]
-                    pe = pe[o] if pe is not None else None
-                    lo_hi = (float(np.min(py - (pe if pe is not None else 0))), float(np.max(py + (pe if pe is not None else 0))))
+                pcs = paper_curves(stat, L)
+                if pcs is not None:
+                    allv = np.concatenate([np.concatenate([y_ - (e_ if e_ is not None else 0), y_ + (e_ if e_ is not None else 0)]) for _, _, _, y_, e_ in pcs])
                     tw = ax.twinx()
-                    if pe is not None:
-                        tw.errorbar(px, py, pe, fmt="s", ms=4, mfc="none", mec="k", ecolor="k", elinewidth=0.8, alpha=0.9, zorder=6)
-                    else:
-                        tw.plot(px, py, "-D", color="k", ms=3.5, lw=1.2, mfc="none", alpha=0.9, zorder=6)
-                    align_zero(ax, tw, lo_hi)
-                    tw.set_ylabel({"zhou": "Zhou+25 Fig. 5 [$\\mu$K$^4$]", "ma_sq": "Ma+18 Fig. 3 [mK $\\mu$K$^2$]", "ma_lin": "Ma+18 Fig. 3 [mK $\\mu$K]"}[stat] +
+                    for lab, ls, x_, y_, e_ in pcs:
+                        o = np.argsort(x_)
+                        x_, y_ = x_[o], y_[o]
+                        if e_ is not None:
+                            tw.errorbar(x_, y_, e_[o], fmt="s", ms=4, mfc="none", mec="k", ecolor="k", elinewidth=0.8, alpha=0.9, zorder=6, label=lab)
+                        else:
+                            tw.plot(x_, y_, ls, color="k", lw=1.4, alpha=0.9, zorder=6, label=lab)
+                    align_zero(ax, tw, (float(allv.min()), float(allv.max())))
+                    tw.set_ylabel({"zhou": "Zhou+25 Fig. 6 [$\\mu$K$^4$]", "ma_sq": "Ma+18 Fig. 3 [mK $\\mu$K$^2$]", "ma_lin": "Ma+18 Fig. 3 [mK $\\mu$K]"}[stat] +
                                   "  (black)", fontsize=9)
                     tw.tick_params(labelsize=9)
+                    if ax is axes[0]:
+                        paper_handles = tw.get_legend_handles_labels()
             ax.set_ylabel(r"$D_\ell/\chi^2$ " + sp["ylab"], fontsize=11)
         axes[0].legend(loc="best", frameon=True, framealpha=0.85, fontsize=9)
         axes[-1].set_xlabel({"z0": r"chunk centre $z_0$", "shifted": r"$z_0 - z_{50}$ of that history",
@@ -313,13 +347,13 @@ for stat, sp in STATS.items():
         elif mode == "xe":
             axes[0].set_xlim(0.0, 1.0)
         if not no_hist:
-            hist_panel(fig.add_subplot(gs[:, 1]))
-        if papers:
-            axes[0].plot([], [], "s", mfc="none", mec="k", label=("Zhou+25 Fiducial (right axis)" if stat == "zhou" else "Ma+18 (right axis)"))
-            axes[0].legend(loc="best", frameon=True, framealpha=0.85, fontsize=9)
+            hist_panel(fig.add_subplot(gs[:, 1]), papers)
+        if papers and paper_handles is not None:
+            hh, ll = paper_handles
+            fig.legend(hh, [t + " (black, right axes)" for t in ll], loc="lower center", ncol=len(ll), frameon=False, fontsize=9)
         fig.suptitle(sp["title"] + " for different reionization histories (21cmFAST, HII_EFF scan)" +
                      ("" if stat == "zhou" else f", 21cm map = '{a.variant}'"), fontsize=13)
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0.035, 1, 1) if papers else None)
         stem = f"heff_{stat}" + {"z0": "", "shifted": "_shifted", "xe": "_xe"}[mode] + ("_papers" if papers else "")
         for ext in ("png", "pdf"):
             fig.savefig(os.path.join(out_dir, f"{stem}.{ext}"), dpi=150, bbox_inches="tight")
