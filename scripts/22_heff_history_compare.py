@@ -45,6 +45,10 @@ ap.add_argument("--ma-tag", default="_dz2_nd0.2_lmin100_z4.5-13.5-0.25", help="0
 ap.add_argument("--variant", default="slice", choices=["slice", "narrow", "slab"], help="21cm map for the Ma statistics")
 ap.add_argument("--out-dir", default=None, help="default <data-root>/heff_history_compare")
 ap.add_argument("--bootstrap", type=int, default=300, help="seed resamples for the peak-location uncertainty (0 = off)")
+ap.add_argument("--papers", action="store_true",
+                help="x_HII plots only: overlay the digitised Ma+18 (Fig. 3) / Zhou+25 (Fig. 5) curves on a right-hand axis, "
+                     "mapped to x_HII through each paper's OWN history; writes heff_<stat>_xe_papers.{png,pdf}")
+ap.add_argument("--no-history-panel", action="store_true", help="drop the x_e(z) side panel (implied by --papers)")
 a = ap.parse_args()
 
 out_dir = a.out_dir or os.path.join(a.data_root, "heff_history_compare")
@@ -225,12 +229,43 @@ def hist_panel(ax):
     ax.invert_xaxis()
 
 
+def paper_curves(stat, L):
+    """[(x_HII, value, err or None)] of the paper curve for this stat/ell, x_HII from THAT paper's history."""
+    from ksz2_21cm.plotting.ma18_data import MA18, ma18_xe_of_z
+    from ksz2_21cm.plotting.zhou25_data import ZHOU_FIG5
+    from ksz2_21cm.plotting.zhou25_history import ZHOU_HISTORY
+    if stat == "zhou":
+        if L not in ZHOU_FIG5:
+            return None
+        zf = ZHOU_HISTORY["Fiducial"]
+        s_ = ZHOU_FIG5[L]
+        return np.interp(s_[:, 0], zf[:, 0], zf[:, 1]), s_[:, 1], None
+    key = f"F3_{'kSZ' if stat == 'ma_lin' else 'kSZ2'}_l{L}"
+    if key not in MA18:
+        return None
+    s_ = MA18[key]
+    return ma18_xe_of_z(s_[:, 0]), s_[:, 1], s_[:, 2]
+
+
+def align_zero(ax, tw, lo_hi):
+    """Give the right axis limits that put its 0 at the same height as the left axis' 0."""
+    lo, hi = ax.get_ylim()
+    f = -lo / (hi - lo) if hi > 0 > lo else 0.5
+    dlo, dhi = lo_hi
+    s_ = max(dhi / (1 - f), -dlo / f, 1e-30) * 1.08
+    tw.set_ylim(-s_ * f, s_ * (1 - f))
+
+
 for stat, sp in STATS.items():
-    for mode in ("z0", "shifted", "xe"):
+    for mode in ("z0", "shifted", "xe", "xe_papers") if a.papers else ("z0", "shifted", "xe"):
+        papers = mode == "xe_papers"
+        if papers:
+            mode = "xe"
         shifted = mode == "shifted"
         n = len(sp["ells"])
-        fig = plt.figure(figsize=(14, 3.1 * n + 0.6))
-        gs = fig.add_gridspec(n, 2, width_ratios=[1.7, 1])
+        no_hist = a.no_history_panel or papers
+        fig = plt.figure(figsize=(10.5 if no_hist else 14, 3.1 * n + 0.6))
+        gs = fig.add_gridspec(n, 1) if no_hist else fig.add_gridspec(n, 2, width_ratios=[1.7, 1])
         axes = [fig.add_subplot(gs[i, 0]) for i in range(n)]
         for ax in axes[1:]:
             ax.sharex(axes[0])
@@ -252,6 +287,23 @@ for stat, sp in STATS.items():
             if mode == "xe":
                 ax.axvline(0.5, color="gray", lw=0.8, ls=":")
             ax.text(0.02, 0.92, rf"$\ell={L}$", transform=ax.transAxes, va="top")
+            if papers:
+                pc = paper_curves(stat, L)
+                if pc is not None:
+                    px, py, pe = pc
+                    o = np.argsort(px)
+                    px, py = px[o], py[o]
+                    pe = pe[o] if pe is not None else None
+                    lo_hi = (float(np.min(py - (pe if pe is not None else 0))), float(np.max(py + (pe if pe is not None else 0))))
+                    tw = ax.twinx()
+                    if pe is not None:
+                        tw.errorbar(px, py, pe, fmt="s", ms=4, mfc="none", mec="k", ecolor="k", elinewidth=0.8, alpha=0.9, zorder=6)
+                    else:
+                        tw.plot(px, py, "-D", color="k", ms=3.5, lw=1.2, mfc="none", alpha=0.9, zorder=6)
+                    align_zero(ax, tw, lo_hi)
+                    tw.set_ylabel({"zhou": "Zhou+25 Fig. 5 [$\\mu$K$^4$]", "ma_sq": "Ma+18 Fig. 3 [mK $\\mu$K$^2$]", "ma_lin": "Ma+18 Fig. 3 [mK $\\mu$K]"}[stat] +
+                                  "  (black)", fontsize=9)
+                    tw.tick_params(labelsize=9)
             ax.set_ylabel(r"$D_\ell/\chi^2$ " + sp["ylab"], fontsize=11)
         axes[0].legend(loc="best", frameon=True, framealpha=0.85, fontsize=9)
         axes[-1].set_xlabel({"z0": r"chunk centre $z_0$", "shifted": r"$z_0 - z_{50}$ of that history",
@@ -260,11 +312,15 @@ for stat, sp in STATS.items():
             axes[0].invert_xaxis()
         elif mode == "xe":
             axes[0].set_xlim(0.0, 1.0)
-        hist_panel(fig.add_subplot(gs[:, 1]))
+        if not no_hist:
+            hist_panel(fig.add_subplot(gs[:, 1]))
+        if papers:
+            axes[0].plot([], [], "s", mfc="none", mec="k", label=("Zhou+25 Fiducial (right axis)" if stat == "zhou" else "Ma+18 (right axis)"))
+            axes[0].legend(loc="best", frameon=True, framealpha=0.85, fontsize=9)
         fig.suptitle(sp["title"] + " for different reionization histories (21cmFAST, HII_EFF scan)" +
                      ("" if stat == "zhou" else f", 21cm map = '{a.variant}'"), fontsize=13)
         fig.tight_layout()
-        stem = f"heff_{stat}" + {"z0": "", "shifted": "_shifted", "xe": "_xe"}[mode]
+        stem = f"heff_{stat}" + {"z0": "", "shifted": "_shifted", "xe": "_xe"}[mode] + ("_papers" if papers else "")
         for ext in ("png", "pdf"):
             fig.savefig(os.path.join(out_dir, f"{stem}.{ext}"), dpi=150, bbox_inches="tight")
         plt.close(fig)

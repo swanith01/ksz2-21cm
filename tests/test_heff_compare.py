@@ -67,3 +67,16 @@ def test_peak_follows_xhii():
 if __name__ == "__main__":
     test_peak_follows_xhii()
     print("ok  test_peak_follows_xhii")
+
+
+def test_papers_overlay_runs():
+    """--papers writes heff_<stat>_xe_papers.png for all three statistics, no history side panel."""
+    with tempfile.TemporaryDirectory() as d:
+        _make_root(d)
+        # Ma files are absent in the synthetic root: only the Zhou statistic is produced, which is enough for the overlay
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts/22_heff_history_compare.py"), "--data-root", d,
+                            "--bootstrap", "0", "--papers"], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        out = os.path.join(d, "heff_history_compare")
+        assert os.path.exists(os.path.join(out, "heff_zhou_xe_papers.png"))
+        assert os.path.exists(os.path.join(out, "heff_zhou_xe.png"))   # the plain plots are still written
